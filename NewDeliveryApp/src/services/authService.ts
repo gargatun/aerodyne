@@ -14,9 +14,13 @@ class AuthService {
         return { success: false, error: response.error || 'Ошибка авторизации' };
       }
 
-      const { access } = response.data;
+      const { access, refresh } = response.data;
 
       await AsyncStorage.setItem(STORAGE_KEYS.USER_TOKEN, access);
+      
+      if (refresh) {
+        await AsyncStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refresh);
+      }
 
       if (response.data.user) {
         await AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(response.data.user));
@@ -46,6 +50,7 @@ class AuthService {
 
   async logout(): Promise<void> {
     await AsyncStorage.removeItem(STORAGE_KEYS.USER_TOKEN);
+    await AsyncStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
     await AsyncStorage.removeItem(STORAGE_KEYS.USER_DATA);
   }
 
@@ -62,7 +67,31 @@ class AuthService {
 
   async isAuthenticated(): Promise<boolean> {
     const token = await AsyncStorage.getItem(STORAGE_KEYS.USER_TOKEN);
-    return !!token;
+    
+    if (!token) {
+      return false;
+    }
+    
+    // Попытка обновить токен, если он есть
+    const refreshToken = await AsyncStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+    if (refreshToken) {
+      try {
+        // Проверяем работоспособность токена
+        const testResponse = await apiService.get(API_CONFIG.endpoints.auth.me);
+        if (testResponse.error) {
+          // Если ошибка, пробуем обновить токен
+          const refreshSuccessful = await apiService.refreshToken();
+          console.log('Результат обновления токена:', refreshSuccessful);
+          return refreshSuccessful;
+        }
+        return true;
+      } catch (error) {
+        console.error('Ошибка при проверке токена:', error);
+        return false;
+      }
+    }
+    
+    return true;
   }
 
   async refreshUserData(): Promise<User | null> {

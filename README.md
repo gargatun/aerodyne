@@ -116,12 +116,31 @@ aerodyne/
 
 ## API Endpoints
 
+### Аутентификация
 - `/api/token/` - Получение JWT токена
 - `/api/token/refresh/` - Обновление JWT токена
+
+### Пользователи
 - `/api/users/me/` - Информация о текущем пользователе
+- `/api/profile/` - Получение профиля пользователя
+- `/api/profile/` - Обновление профиля пользователя (PUT)
+
+### Справочники
+- `/api/transport-models/` - Получение списка моделей транспорта
+- `/api/packaging-types/` - Получение списка типов упаковки
+- `/api/services/` - Получение списка доступных услуг
+- `/api/statuses/` - Получение списка статусов доставки
+
+### Доставки
 - `/api/deliveries/available/` - Список доступных доставок
 - `/api/deliveries/my/active/` - Список активных доставок курьера
+- `/api/deliveries/my/history/` - История доставок курьера
 - `/api/deliveries/{id}/` - Детали конкретной доставки
-- `/api/deliveries/{id}/accept/` - Принять доставку
-- `/api/deliveries/{id}/status/` - Изменить статус доставки
+- `/api/deliveries/` - Создание новой доставки (POST)
+- `/api/deliveries/{id}/` - Обновление существующей доставки (PUT)
+- `/api/deliveries/{id}/assign/` - Назначить доставку курьеру
+- `/api/deliveries/{id}/unassign/` - Отменить назначение доставки
+- `/api/deliveries/{id}/media/` - Загрузка медиафайлов для доставки
+- `/api/deliveries/sync/` - Синхронизация данных о доставках
+- `/api/deliveries/coordinates/` - Получение координат всех доставок
 

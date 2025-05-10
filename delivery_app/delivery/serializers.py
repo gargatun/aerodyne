@@ -54,12 +54,19 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     """Сериализатор для профиля пользователя."""
-    user = UserSerializer()
+    user = UserSerializer(read_only=True)
 
     class Meta:
         """Метаданные сериализатора профиля пользователя."""
         model = UserProfile
         fields = ['user', 'phone', 'email']
+        
+    def update(self, instance, validated_data):
+        """Обновляет существующий профиль пользователя."""
+        instance.phone = validated_data.get('phone', instance.phone)
+        instance.email = validated_data.get('email', instance.email)
+        instance.save()
+        return instance
 
 class DeliverySerializer(serializers.ModelSerializer):
     """Сериализатор для доставки."""
@@ -76,7 +83,8 @@ class DeliverySerializer(serializers.ModelSerializer):
             'id', 'transport_model', 'transport_number',
             'start_time', 'end_time', 'distance', 'media_file',
             'services', 'packaging', 'status', 'technical_condition',
-            'courier', 'source_address', 'destination_address'
+            'courier', 'source_address', 'destination_address',
+            'source_lat', 'source_lon', 'dest_lat', 'dest_lon'
         ]
 
     def create(self, validated_data):

@@ -4,11 +4,13 @@
 """
 
 
-from rest_framework import viewsets, views
+from rest_framework import viewsets, views, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.shortcuts import get_object_or_404
 
 from .models import (
     TransportModel,
@@ -59,23 +61,188 @@ class DeliveryViewSet(viewsets.ModelViewSet):
     queryset = Delivery.objects.all()
     serializer_class = DeliverySerializer
     permission_classes = [IsAuthenticated]
+    
+    @action(detail=True, methods=['patch'])
+    def assign(self, request, pk=None):
+        """
+        Присваивает доставку текущему пользователю.
+        
+        Args:
+            request: HTTP запрос
+            pk: ID доставки
+            
+        Returns:
+            Response: Данные о доставке или ошибка
+        """
+        delivery = self.get_object()
+        
+        if delivery.courier is not None:
+            return Response(
+                {"error": "Доставка уже назначена курьеру."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        delivery.courier = request.user
+        delivery.save()
+        
+        serializer = self.get_serializer(delivery)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['patch'])
+    def unassign(self, request, pk=None):
+        """
+        Снимает назначение доставки с текущего пользователя.
+        
+        Args:
+            request: HTTP запрос
+            pk: ID доставки
+            
+        Returns:
+            Response: Данные о доставке или ошибка
+        """
+        delivery = self.get_object()
+        
+        if delivery.courier != request.user:
+            return Response(
+                {"error": "Вы не являетесь курьером этой доставки."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        delivery.courier = None
+        delivery.save()
+        
+        serializer = self.get_serializer(delivery)
+        return Response(serializer.data)
+        
+    @action(detail=True, methods=['post'])
+    def media(self, request, pk=None):
+        """
+        Загружает медиафайл для доставки.
+        
+        Args:
+            request: HTTP запрос
+            pk: ID доставки
+            
+        Returns:
+            Response: Данные о доставке или ошибка
+        """
+        delivery = self.get_object()
+        
+        if 'media_file' not in request.FILES:
+            return Response(
+                {"error": "Файл не предоставлен."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        delivery.media_file = request.FILES['media_file']
+        delivery.save()
+        
+        serializer = self.get_serializer(delivery)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'])
+    def sync(self, request):
+        """
+        Синхронизирует офлайн-изменения доставок.
+        
+        Args:
+            request: HTTP запрос
+            
+        Returns:
+            Response: Результаты синхронизации
+        """
+        changes = request.data.get('changes', [])
+        results = []
+        
+        for change in changes:
+            change_id = change.get('id')
+            action_type = change.get('action')
+            data = change.get('data', {})
+            
+            try:
+                if action_type == 'create':
+                    serializer = self.get_serializer(data=data)
+                    serializer.is_valid(raise_exception=True)
+                    serializer.save()
+                    results.append({
+                        'id': change_id,
+                        'status': 'created',
+                        'data': serializer.data
+                    })
+                elif action_type == 'update':
+                    if 'id' not in data:
+                        results.append({
+                            'id': change_id,
+                            'status': 'error',
+                            'error': 'ID не указан для обновления'
+                        })
+                        continue
+                    
+                    delivery = get_object_or_404(Delivery, id=data['id'])
+                    serializer = self.get_serializer(delivery, data=data, partial=True)
+                    serializer.is_valid(raise_exception=True)
+                    serializer.save()
+                    results.append({
+                        'id': change_id,
+                        'status': 'updated',
+                        'data': serializer.data
+                    })
+                else:
+                    results.append({
+                        'id': change_id,
+                        'status': 'error',
+                        'error': f'Неизвестное действие: {action_type}'
+                    })
+            except Exception as e:
+                results.append({
+                    'id': change_id,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        return Response(results)
+    
+    @action(detail=False, methods=['get'])
+    def coordinates(self, request):
+        """
+        Возвращает координаты доставок.
+        
+        Args:
+            request: HTTP запрос
+            
+        Returns:
+            Response: Список координат доставок
+        """
+        deliveries = self.queryset.filter(
+            courier__isnull=True
+        ).values('id', 'source_lat', 'source_lon', 'dest_lat', 'dest_lon')
+        
+        # Фильтруем только те доставки, у которых заполнены координаты
+        result = []
+        for delivery in deliveries:
+            if (delivery.get('source_lat') and delivery.get('source_lon') and 
+                delivery.get('dest_lat') and delivery.get('dest_lon')):
+                result.append(delivery)
+        
+        return Response(result)
 
 class AvailableDeliveriesView(views.APIView):
     """Представление для получения доступных доставок."""
     permission_classes = [IsAuthenticated]
 
-    def get(self, _request):
+    def get(self, request):
         """
         Получает список доставок без назначенного курьера и со статусом "В ожидании".
+        Поддерживает фильтрацию по максимальному расстоянию и сортировку.
         
         Args:
-            _request: HTTP запрос
+            request: HTTP запрос
             
         Returns:
             Response: Список доступных доставок
         """
         # Получаем или создаем статус "В ожидании"
-        status, _ = Status.objects.get_or_create(
+        status_obj, _ = Status.objects.get_or_create(
             name="В ожидании",
             defaults={'color': 'yellow'}
         )
@@ -83,12 +250,29 @@ class AvailableDeliveriesView(views.APIView):
         # Получаем доставки без курьера и с нужным статусом
         deliveries = Delivery.objects.filter(
             courier__isnull=True,
-            status=status
+            status=status_obj
         ).select_related(
             'transport_model',
             'packaging',
             'status'
         ).prefetch_related('services')
+        
+        # Фильтрация по максимальному расстоянию
+        max_distance = request.query_params.get('max_distance')
+        if max_distance and max_distance.isdigit():
+            deliveries = deliveries.filter(distance__lte=float(max_distance))
+        
+        # Сортировка
+        sort_by = request.query_params.get('sort_by')
+        if sort_by:
+            if sort_by == 'distance':
+                deliveries = deliveries.order_by('distance')
+            elif sort_by == '-distance':
+                deliveries = deliveries.order_by('-distance')
+            elif sort_by == 'start_time':
+                deliveries = deliveries.order_by('start_time')
+            elif sort_by == '-start_time':
+                deliveries = deliveries.order_by('-start_time')
 
         serializer = DeliverySerializer(deliveries, many=True)
         return Response(serializer.data)
@@ -181,6 +365,31 @@ class ProfileView(views.APIView):
         }
 
         return Response({**serializer.data, **stats})
+        
+    def put(self, request):
+        """
+        Обновляет профиль курьера.
+        
+        Args:
+            request: HTTP запрос
+            
+        Returns:
+            Response: Обновленный профиль
+        """
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        
+        # Обновляем только поля профиля, не затрагивая вложенный объект user
+        data = {}
+        if 'phone' in request.data:
+            data['phone'] = request.data['phone']
+        if 'email' in request.data:
+            data['email'] = request.data['email']
+        
+        serializer = UserProfileSerializer(profile, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        
+        return Response(serializer.data)
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod

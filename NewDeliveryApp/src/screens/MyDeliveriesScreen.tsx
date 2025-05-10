@@ -1,89 +1,177 @@
 import React, { useState, useEffect } from 'react';
-import { View, FlatList, StyleSheet, Text } from 'react-native';
-import { Card, Title, Paragraph, Button, Snackbar, Chip, ActivityIndicator } from 'react-native-paper';
+import { View, StyleSheet, FlatList, Animated, TouchableOpacity } from 'react-native';
+import { Card, Title, Paragraph, Chip, Text, Snackbar, Badge, ProgressBar, useTheme } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { deliveryService } from '../services/deliveryService';
 import { Delivery, DeliveryStatus } from '../types';
 import { ERROR_MESSAGES } from '../constants';
+import { apiService } from '../services/api';
+import { API_CONFIG } from '../config';
+
+const Tab = React.forwardRef(({ children, active, onPress }: { children: React.ReactNode, active: boolean, onPress: () => void }, ref) => {
+  const theme = useTheme();
+  return (
+    <TouchableOpacity 
+      style={[styles.tab, active && { borderBottomColor: theme.colors.primary, borderBottomWidth: 2 }]}
+      onPress={onPress}
+      ref={ref as any}
+    >
+      <Text style={[styles.tabText, active && { color: theme.colors.primary }]}>{children}</Text>
+    </TouchableOpacity>
+  );
+});
 
 const MyDeliveriesScreen = () => {
-  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const navigation = useNavigation<any>();
+  const [activeTab, setActiveTab] = useState(0);
+  const [activeDeliveries, setActiveDeliveries] = useState<Delivery[]>([]);
+  const [historyDeliveries, setHistoryDeliveries] = useState<Delivery[]>([]);
+  const [loadingActive, setLoadingActive] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [successMessage, setSuccessMessage] = useState('');
   const { isOffline } = useNetworkStatus();
+  
+  // Для анимации вкладок
+  const [translateX] = useState(new Animated.Value(0));
 
-  const fetchDeliveries = async () => {
-    setLoading(true);
+  useEffect(() => {
+    fetchActiveDeliveries();
+    fetchHistoryDeliveries();
+  }, []);
+  
+  useEffect(() => {
+    Animated.timing(translateX, {
+      toValue: activeTab * 50,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [activeTab]);
+
+  const fetchActiveDeliveries = async () => {
+    setLoadingActive(true);
     setError('');
-
+    
     try {
-      console.log('Загрузка моих доставок...');
-      const response = await deliveryService.getMyDeliveries();
-      
-      console.log('Ответ от API:', response);
+      const response = await apiService.get<any[]>(API_CONFIG.endpoints.deliveries.my.active);
       
       if (response.error) {
-        console.error('Ошибка при загрузке доставок:', response.error);
         setError(response.error);
         return;
       }
-
-      if (response.deliveries) {
-        console.log(`Получено ${response.deliveries.length} доставок`);
-        setDeliveries(response.deliveries);
-      } else {
-        console.log('Список доставок пуст или не определен');
-        setDeliveries([]);
+      
+      if (response.data) {
+        // Преобразуем данные API в формат Delivery
+        const mappedDeliveries = mapApiDataToDeliveries(response.data);
+        setActiveDeliveries(mappedDeliveries);
       }
-
+      
       if (response.offline) {
         setError(ERROR_MESSAGES.OFFLINE_MODE);
       }
     } catch (err) {
-      console.error('Исключение при загрузке доставок:', err);
-      setError('Ошибка загрузки доставок');
+      setError('Ошибка загрузки активных доставок');
+      console.error(err);
     } finally {
-      setLoading(false);
+      setLoadingActive(false);
     }
   };
-
-  useEffect(() => {
-    fetchDeliveries();
-  }, []);
-
-  const handleUpdateStatus = async (id: number, status: DeliveryStatus) => {
+  
+  const fetchHistoryDeliveries = async () => {
+    setLoadingHistory(true);
+    setError('');
+    
     try {
-      const response = await deliveryService.updateDeliveryStatus(id, status);
+      const response = await apiService.get<any[]>(API_CONFIG.endpoints.deliveries.my.history);
       
-      if (response.success) {
-        // Обновляем список после изменения статуса
-        fetchDeliveries();
-      } else {
-        setError(response.error || 'Ошибка при обновлении статуса');
+      if (response.error) {
+        setError(response.error);
+        return;
+      }
+      
+      if (response.data) {
+        // Преобразуем данные API в формат Delivery
+        const mappedDeliveries = mapApiDataToDeliveries(response.data);
+        setHistoryDeliveries(mappedDeliveries);
+      }
+      
+      if (response.offline) {
+        setError(ERROR_MESSAGES.OFFLINE_MODE);
       }
     } catch (err) {
-      setError('Ошибка при обновлении статуса');
+      setError('Ошибка загрузки истории доставок');
+      console.error(err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+  
+  const mapApiDataToDeliveries = (apiData: any[]): Delivery[] => {
+    return apiData.map(apiDelivery => {
+      // Маппинг статуса API в DeliveryStatus
+      let status: DeliveryStatus;
+      switch (apiDelivery.status.name) {
+        case 'В ожидании':
+          status = DeliveryStatus.PENDING;
+          break;
+        case 'Назначена':
+          status = DeliveryStatus.ASSIGNED;
+          break;
+        case 'В пути':
+          status = DeliveryStatus.IN_PROGRESS;
+          break;
+        case 'Доставлена':
+          status = DeliveryStatus.DELIVERED;
+          break;
+        case 'Отменена':
+          status = DeliveryStatus.CANCELLED;
+          break;
+        default:
+          status = DeliveryStatus.PENDING;
+      }
+
+      return {
+        id: apiDelivery.id,
+        title: `Доставка ${apiDelivery.transport_number}`,
+        description: `${apiDelivery.transport_model.name}, ${apiDelivery.packaging.name}`,
+        fromAddress: apiDelivery.source_address || 'Не указан',
+        toAddress: apiDelivery.destination_address || 'Не указан',
+        status: status,
+        createdAt: apiDelivery.start_time,
+        updatedAt: apiDelivery.end_time,
+        client: 0,
+        courier: apiDelivery.courier?.id,
+        price: apiDelivery.distance * 100,
+        weight: 0,
+        estimatedDeliveryTime: apiDelivery.end_time,
+      };
+    });
+  };
+
+  const handleUnassignDelivery = async (id: number) => {
+    try {
+      const response = await apiService.patch(`/deliveries/${id}/unassign/`, {});
+      
+      if (response.error) {
+        setError(response.error);
+        return;
+      }
+      
+      setSuccessMessage('Доставка успешно снята');
+      
+      // Обновляем список активных доставок
+      setActiveDeliveries(activeDeliveries.filter(delivery => delivery.id !== id));
+    } catch (err) {
+      setError('Ошибка при снятии доставки');
+      console.error(err);
     }
   };
 
-  const getStatusColor = (status: DeliveryStatus) => {
-    switch (status) {
-      case DeliveryStatus.PENDING:
-        return '#FFA000';
-      case DeliveryStatus.ASSIGNED:
-        return '#2196F3';
-      case DeliveryStatus.IN_PROGRESS:
-        return '#7B1FA2';
-      case DeliveryStatus.DELIVERED:
-        return '#388E3C';
-      case DeliveryStatus.CANCELLED:
-        return '#D32F2F';
-      default:
-        return '#757575';
-    }
+  const navigateToDeliveryDetails = (deliveryId: number) => {
+    navigation.navigate('DeliveryDetails', { deliveryId });
   };
 
-  const getStatusName = (status: DeliveryStatus) => {
+  const getStatusName = (status: DeliveryStatus): string => {
     switch (status) {
       case DeliveryStatus.PENDING:
         return 'Ожидает';
@@ -100,88 +188,129 @@ const MyDeliveriesScreen = () => {
     }
   };
 
-  const renderDelivery = ({ item }: { item: Delivery }) => (
-    <Card style={styles.card}>
+  const getStatusColor = (status: DeliveryStatus): string => {
+    switch (status) {
+      case DeliveryStatus.PENDING:
+        return '#FFA000';
+      case DeliveryStatus.ASSIGNED:
+        return '#2196F3';
+      case DeliveryStatus.IN_PROGRESS:
+        return '#7B1FA2';
+      case DeliveryStatus.DELIVERED:
+        return '#388E3C';
+      case DeliveryStatus.CANCELLED:
+        return '#D32F2F';
+      default:
+        return '#757575';
+    }
+  };
+
+  const renderDeliveryItem = ({ item }: { item: Delivery }) => (
+    <Card 
+      style={styles.card} 
+      onPress={() => navigateToDeliveryDetails(item.id)}
+    >
       <Card.Content>
         <Title>{item.title}</Title>
         <Paragraph>{item.description}</Paragraph>
-        <View style={styles.addressContainer}>
-          <Paragraph>От: {item.fromAddress}</Paragraph>
-          <Paragraph>До: {item.toAddress}</Paragraph>
-        </View>
+        <Paragraph>От: {item.fromAddress}</Paragraph>
+        <Paragraph>До: {item.toAddress}</Paragraph>
         <Chip 
           style={{ backgroundColor: getStatusColor(item.status), alignSelf: 'flex-start', marginVertical: 8 }}
           textStyle={{ color: 'white' }}
         >
           {getStatusName(item.status)}
         </Chip>
-        <Paragraph>Цена: {item.price} ₽</Paragraph>
+        <Paragraph>Расстояние: {item.price / 100} км</Paragraph>
+        
+        {activeTab === 0 && item.status !== DeliveryStatus.DELIVERED && (
+          <TouchableOpacity 
+            style={styles.unassignButton} 
+            onPress={() => handleUnassignDelivery(item.id)}
+            disabled={isOffline}
+          >
+            <Text style={[styles.unassignText, isOffline && styles.disabledText]}>
+              Отказаться от доставки
+            </Text>
+          </TouchableOpacity>
+        )}
       </Card.Content>
-      <Card.Actions style={styles.actions}>
-        {item.status === DeliveryStatus.ASSIGNED && (
-          <Button 
-            mode="contained" 
-            onPress={() => handleUpdateStatus(item.id, DeliveryStatus.IN_PROGRESS)} 
-            disabled={loading || isOffline}
-            style={styles.button}
-          >
-            Начать доставку
-          </Button>
-        )}
-        {item.status === DeliveryStatus.IN_PROGRESS && (
-          <Button 
-            mode="contained" 
-            onPress={() => handleUpdateStatus(item.id, DeliveryStatus.DELIVERED)} 
-            disabled={loading || isOffline}
-            style={styles.button}
-          >
-            Завершить
-          </Button>
-        )}
-      </Card.Actions>
     </Card>
   );
 
-  const renderEmptyList = () => {
-    if (loading) {
-      return (
-        <View style={styles.emptyContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.emptyText}>Загрузка доставок...</Text>
-        </View>
-      );
-    }
-    
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>У вас пока нет доставок</Text>
-        <Button 
-          mode="contained" 
-          onPress={fetchDeliveries}
-          style={styles.refreshButton}
-        >
-          Обновить
-        </Button>
-      </View>
-    );
-  };
-
   return (
     <View style={styles.container}>
-      <FlatList
-        data={deliveries}
-        renderItem={renderDelivery}
-        keyExtractor={(item) => item.id.toString()}
-        refreshing={loading}
-        onRefresh={fetchDeliveries}
-        ListEmptyComponent={renderEmptyList}
-      />
+      <View style={styles.tabContainer}>
+        <Tab active={activeTab === 0} onPress={() => setActiveTab(0)}>
+          Активные
+          {activeDeliveries.length > 0 && <Badge style={styles.badge}>{activeDeliveries.length}</Badge>}
+        </Tab>
+        <Tab active={activeTab === 1} onPress={() => setActiveTab(1)}>
+          История
+          {historyDeliveries.length > 0 && <Badge style={styles.badge}>{historyDeliveries.length}</Badge>}
+        </Tab>
+        <Animated.View 
+          style={[
+            styles.indicator, 
+            { 
+              transform: [{ translateX }],
+              width: `${100 / 2}%` 
+            }
+          ]} 
+        />
+      </View>
+      
+      {(activeTab === 0 && loadingActive) || (activeTab === 1 && loadingHistory) ? (
+        <View style={styles.loadingContainer}>
+          <ProgressBar indeterminate style={styles.progressBar} />
+          <Text>Загрузка данных...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={activeTab === 0 ? activeDeliveries : historyDeliveries}
+          renderItem={renderDeliveryItem}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={styles.listContainer}
+          refreshing={(activeTab === 0 && loadingActive) || (activeTab === 1 && loadingHistory)}
+          onRefresh={() => activeTab === 0 ? fetchActiveDeliveries() : fetchHistoryDeliveries()}
+          ListEmptyComponent={
+            <Card style={styles.emptyCard}>
+              <Card.Content>
+                <Title style={styles.emptyTitle}>
+                  {activeTab === 0 ? 'Нет активных доставок' : 'История доставок пуста'}
+                </Title>
+                <Paragraph>
+                  {activeTab === 0 
+                    ? 'Посетите экран "Доставки", чтобы найти доступные заказы' 
+                    : 'Завершите хотя бы одну доставку, чтобы увидеть её в истории'
+                  }
+                </Paragraph>
+              </Card.Content>
+            </Card>
+          }
+        />
+      )}
+      
       <Snackbar
         visible={!!error}
         onDismiss={() => setError('')}
-        duration={3000}
+        action={{
+          label: 'ОК',
+          onPress: () => setError(''),
+        }}
       >
         {error}
+      </Snackbar>
+      
+      <Snackbar
+        visible={!!successMessage}
+        onDismiss={() => setSuccessMessage('')}
+        action={{
+          label: 'ОК',
+          onPress: () => setSuccessMessage(''),
+        }}
+      >
+        {successMessage}
       </Snackbar>
     </View>
   );
@@ -191,37 +320,74 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    elevation: 4,
+    position: 'relative',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  indicator: {
+    position: 'absolute',
+    height: 2,
+    bottom: 0,
+    backgroundColor: '#2196F3',
+  },
+  listContainer: {
     padding: 8,
   },
   card: {
     margin: 8,
     elevation: 2,
   },
-  addressContainer: {
-    marginVertical: 8,
+  badge: {
+    position: 'absolute',
+    top: 4,
+    right: -20,
   },
-  actions: {
-    justifyContent: 'flex-end',
+  unassignButton: {
+    marginTop: 8,
+    padding: 8,
+    alignItems: 'center',
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f44336',
   },
-  button: {
-    marginLeft: 8,
+  unassignText: {
+    color: '#f44336',
   },
-  emptyContainer: {
+  disabledText: {
+    color: '#9e9e9e',
+  },
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    marginTop: 100,
   },
-  emptyText: {
-    fontSize: 18,
-    color: '#757575',
-    marginVertical: 20,
+  progressBar: {
+    width: '80%',
+    marginBottom: 20,
+  },
+  emptyCard: {
+    margin: 16,
+    padding: 16,
+    alignItems: 'center',
+  },
+  emptyTitle: {
     textAlign: 'center',
+    marginBottom: 8,
   },
-  refreshButton: {
-    marginTop: 20,
-  }
 });
 
 export default MyDeliveriesScreen; 

@@ -18,10 +18,26 @@ export const API_CONFIG = {
     },
     deliveries: {
       available: '/deliveries/available/',
-      my: '/deliveries/my/active/',
+      my: {
+        active: '/deliveries/my/active/',
+        history: '/deliveries/my/history/'
+      },
       details: (id: number) => `/deliveries/${id}/`,
-      accept: (id: number) => `/deliveries/${id}/accept/`,
-      status: (id: number) => `/deliveries/${id}/status/`,
+      assign: (id: number) => `/deliveries/${id}/assign/`,
+      unassign: (id: number) => `/deliveries/${id}/unassign/`,
+      media: (id: number) => `/deliveries/${id}/media/`,
+      sync: '/deliveries/sync/',
+      coordinates: '/deliveries/coordinates/'
+    },
+    profile: {
+      get: '/profile/',
+      update: '/profile/'
+    },
+    reference: {
+      transportModels: '/transport-models/',
+      packagingTypes: '/packaging-types/',
+      services: '/services/',
+      statuses: '/statuses/',
     }
   }
 };

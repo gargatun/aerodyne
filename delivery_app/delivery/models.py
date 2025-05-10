@@ -90,6 +90,10 @@ class Delivery(models.Model):
     courier = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     source_address = models.CharField(max_length=255, blank=True)
     destination_address = models.CharField(max_length=255, blank=True)
+    source_lat = models.FloatField(blank=True, null=True)
+    source_lon = models.FloatField(blank=True, null=True)
+    dest_lat = models.FloatField(blank=True, null=True)
+    dest_lon = models.FloatField(blank=True, null=True)
 
     def __str__(self) -> str:
         return f"Delivery {self.transport_number}"

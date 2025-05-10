@@ -1,13 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { TextInput, Button, Snackbar, Text } from 'react-native-paper';
-import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import React, { useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { TextInput, Button, Text, Snackbar } from 'react-native-paper';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
 import { authService } from '../services/authService';
-import { ERROR_MESSAGES } from '../constants';
+import { STORAGE_KEYS } from '../constants';
+import { apiService } from '../services/api';
+import i18n from '../i18n';
+import { LoginCredentials } from '../types';
 
 interface LoginScreenProps {
-  navigation: any;
-  setIsAuthenticated: (auth: boolean) => void;
+  setIsAuthenticated: (value: boolean) => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ setIsAuthenticated }) => {
@@ -15,52 +18,37 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ setIsAuthenticated }) 
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { isOffline } = useNetworkStatus();
-
-  useEffect(() => {
-    // Проверяем сохраненный токен
-    checkStoredToken();
-  }, []);
-
-  const checkStoredToken = async () => {
-    try {
-      console.log('Проверка сохраненного токена...');
-      const isAuthenticated = await authService.isAuthenticated();
-      console.log('Пользователь авторизован:', isAuthenticated);
-      if (isAuthenticated) {
-        setIsAuthenticated(true);
-      }
-    } catch (error) {
-      console.error('Ошибка при проверке токена:', error);
-    }
-  };
+  const navigation = useNavigation();
 
   const handleLogin = async () => {
-    if (isOffline) {
-      setError(ERROR_MESSAGES.NETWORK_ERROR);
-      return;
-    }
-
     if (!username || !password) {
-      setError('Пожалуйста, заполните все поля');
+      setError(i18n.t('errors.fill_required_fields'));
       return;
     }
 
     setLoading(true);
+    setError('');
+
     try {
-      console.log('Попытка входа с логином:', username);
-      const result = await authService.login({ username, password });
+      const credentials: LoginCredentials = { username, password };
+      const result = await authService.login(credentials);
       
-      console.log('Результат входа:', result);
-      if (result.success) {
-        console.log('Вход успешен, устанавливаем isAuthenticated в true');
-        setIsAuthenticated(true);
-      } else {
-        setError(result.error || ERROR_MESSAGES.LOGIN_FAILED);
+      if (result.error) {
+        setError(result.error || i18n.t('auth.login_error'));
+        return;
       }
-    } catch (error) {
-      console.error('Ошибка при входе:', error);
-      setError(ERROR_MESSAGES.SERVER_ERROR);
+      
+      if (result.success) {
+        // Токен и пользовательские данные уже сохранены в authService.login
+        
+        // Обновим token для будущих запросов
+        apiService.refreshToken();
+        
+        setIsAuthenticated(true);
+      }
+    } catch (err) {
+      console.error(err);
+      setError(i18n.t('errors.unknown_error'));
     } finally {
       setLoading(false);
     }
@@ -68,43 +56,57 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ setIsAuthenticated }) 
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Вход в систему</Text>
+      <View style={styles.header}>
+        {/* Логотип закомментирован для избежания ошибок загрузки файла */}
+        {/* <Image 
+          source={require('../assets/logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        /> */}
+        <Text style={styles.title}>{i18n.t('auth.welcome')}</Text>
+      </View>
       
-      <TextInput
-        label="Логин"
-        value={username}
-        onChangeText={setUsername}
-        style={styles.input}
-        mode="outlined"
-        disabled={loading}
-      />
+      <View style={styles.formContainer}>
+        <TextInput
+          label={i18n.t('auth.username')}
+          value={username}
+          onChangeText={setUsername}
+          style={styles.input}
+          autoCapitalize="none"
+          placeholder={i18n.t('auth.enter_username')}
+          left={<TextInput.Icon icon="account" />}
+        />
+        
+        <TextInput
+          label={i18n.t('auth.password')}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          style={styles.input}
+          placeholder={i18n.t('auth.enter_password')}
+          left={<TextInput.Icon icon="lock" />}
+        />
+        
+        <Button 
+          mode="contained" 
+          onPress={handleLogin} 
+          style={styles.button}
+          loading={loading}
+          disabled={loading}
+        >
+          {i18n.t('auth.login')}
+        </Button>
+        
+        <TouchableOpacity style={styles.forgotPassword}>
+          <Text style={styles.forgotPasswordText}>Забыли пароль?</Text>
+        </TouchableOpacity>
+      </View>
       
-      <TextInput
-        label="Пароль"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        style={styles.input}
-        mode="outlined"
-        disabled={loading}
-      />
-      
-      <Button
-        mode="contained"
-        onPress={handleLogin}
-        loading={loading}
-        disabled={loading || isOffline}
-        style={styles.button}
-      >
-        Войти
-      </Button>
-
       <Snackbar
         visible={!!error}
         onDismiss={() => setError('')}
-        duration={3000}
         action={{
-          label: 'OK',
+          label: i18n.t('common.ok'),
           onPress: () => setError(''),
         }}
       >
@@ -120,16 +122,33 @@ const styles = StyleSheet.create({
     padding: 20,
     justifyContent: 'center',
   },
+  header: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  logo: {
+    width: 150,
+    height: 150,
+    marginBottom: 20,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  formContainer: {
     marginBottom: 20,
-    textAlign: 'center',
   },
   input: {
     marginBottom: 12,
   },
   button: {
     marginTop: 16,
+  },
+  forgotPassword: {
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  forgotPasswordText: {
+    color: 'blue',
   },
 }); 
