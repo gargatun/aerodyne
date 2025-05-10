@@ -38,4 +38,3 @@ class UserProfileAdmin(admin.ModelAdmin):
     """Административный интерфейс для профиля пользователя."""
     list_display = ['user', 'phone', 'email']
     search_fields = ['user__username']
-    

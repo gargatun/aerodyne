@@ -7,6 +7,8 @@
 from rest_framework import viewsets, views
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import (
     TransportModel,
@@ -73,7 +75,7 @@ class AvailableDeliveriesView(views.APIView):
             Response: Список доступных доставок
         """
         # Получаем или создаем статус "В ожидании"
-        status = Status.objects.get_or_create(
+        status, _ = Status.objects.get_or_create(
             name="В ожидании",
             defaults={'color': 'yellow'}
         )
@@ -146,7 +148,7 @@ class ProfileView(views.APIView):
         Returns:
             Response: Профиль и статистика курьера
         """
-        profile = UserProfile.objects.get_or_create(user=request.user)
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
         serializer = UserProfileSerializer(profile)
 
         # Статистика
@@ -179,3 +181,20 @@ class ProfileView(views.APIView):
         }
 
         return Response({**serializer.data, **stats})
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        return token
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        data['user'] = {
+            'id': self.user.id,
+            'username': self.user.username,
+        }
+        return data
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer

@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security settings
 SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "10.0.2.2", "*"]
 
 # Application definition
 INSTALLED_APPS = [
@@ -46,8 +46,9 @@ MIDDLEWARE = [
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Для React
-    "http://localhost:8080",  # Для React Native (эмулятор)
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://10.0.2.2:8000",
 ]
 
 ROOT_URLCONF = "delivery_app.urls"
