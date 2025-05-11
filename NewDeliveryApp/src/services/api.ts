@@ -374,9 +374,11 @@ class ApiService {
       }
 
       console.log(`Отправка PATCH запроса на: ${this.baseUrl}${endpoint}`);
-      console.log('Тело запроса:', body);
+      console.log('Тело запроса:', JSON.stringify(body));
 
       const headers = await this.getHeaders();
+      console.log('Заголовки запроса:', Object.fromEntries(headers.entries()));
+
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'PATCH',
         headers,
@@ -386,16 +388,48 @@ class ApiService {
       console.log(`Ответ от сервера: ${response.status}`);
       
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`HTTP error! Status: ${response.status}, Body:`, errorText);
-        throw new Error(`HTTP error! Status: ${response.status}`);
+        let errorText;
+        try {
+          errorText = await response.text();
+          console.error(`HTTP error! Status: ${response.status}, Body:`, errorText);
+          
+          // Подробная обработка ошибок 400 (Bad Request)
+          if (response.status === 400) {
+            try {
+              const errorData = JSON.parse(errorText);
+              let errorDetails = '';
+              
+              // Формируем подробное сообщение об ошибке
+              if (typeof errorData === 'object') {
+                Object.keys(errorData).forEach(key => {
+                  const value = errorData[key];
+                  if (Array.isArray(value)) {
+                    errorDetails += `${key}: ${value.join(', ')}; `;
+                  } else {
+                    errorDetails += `${key}: ${value}; `;
+                  }
+                });
+              }
+              
+              return { error: `HTTP error 400 Bad Request. ${errorDetails}\nBody: ${errorText}` };
+            } catch (jsonError) {
+              // Если не удалось распарсить JSON, возвращаем оригинальный текст ошибки
+              console.error('Ошибка парсинга JSON ответа:', jsonError);
+            }
+          }
+        } catch (textError) {
+          errorText = 'Не удалось получить текст ошибки';
+          console.error('Ошибка получения текста ответа:', textError);
+        }
+        
+        return { error: `HTTP error! Status: ${response.status}, Body: ${errorText}` };
       }
 
       const data = await response.json();
-      console.log('Данные ответа:', data);
+      console.log('Данные ответа PATCH:', data);
       return { data };
     } catch (error) {
-      console.error('Ошибка API запроса:', error);
+      console.error('Ошибка API запроса (PATCH):', error);
       return { error: (error as Error).message };
     }
   }

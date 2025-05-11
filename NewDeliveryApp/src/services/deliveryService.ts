@@ -25,24 +25,10 @@ class DeliveryService {
   private mapApiDeliveryToDelivery(apiDelivery: ApiDelivery): Delivery {
     // Маппинг статуса API в DeliveryStatus
     let status: DeliveryStatus;
-    switch (apiDelivery.status.name) {
-      case 'В ожидании':
-        status = DeliveryStatus.PENDING;
-        break;
-      case 'Назначена':
-        status = DeliveryStatus.ASSIGNED;
-        break;
-      case 'В пути':
-        status = DeliveryStatus.IN_PROGRESS;
-        break;
-      case 'Доставлена':
-        status = DeliveryStatus.DELIVERED;
-        break;
-      case 'Отменена':
-        status = DeliveryStatus.CANCELLED;
-        break;
-      default:
-        status = DeliveryStatus.PENDING;
+    if (apiDelivery.status.id === 3) {
+      status = DeliveryStatus.DELIVERED;
+    } else {
+      status = DeliveryStatus.PENDING;
     }
 
     return {
@@ -78,7 +64,7 @@ class DeliveryService {
 
   async getMyDeliveries(): Promise<{ deliveries?: Delivery[]; error?: string; offline?: boolean }> {
     try {
-      const response = await apiService.get<ApiDelivery[]>(API_CONFIG.endpoints.deliveries.my);
+      const response = await apiService.get<ApiDelivery[]>(API_CONFIG.endpoints.deliveries.my.active);
       
       return {
         deliveries: response.data?.map(item => this.mapApiDeliveryToDelivery(item)),
@@ -106,7 +92,7 @@ class DeliveryService {
 
   async acceptDelivery(id: number): Promise<{ success: boolean; error?: string; offline?: boolean }> {
     try {
-      const response = await apiService.put<ApiDelivery>(API_CONFIG.endpoints.deliveries.accept(id), {});
+      const response = await apiService.put<ApiDelivery>(API_CONFIG.endpoints.deliveries.assign(id), {});
       
       return {
         success: !response.error,
@@ -120,29 +106,16 @@ class DeliveryService {
 
   async updateDeliveryStatus(id: number, status: DeliveryStatus): Promise<{ success: boolean; error?: string; offline?: boolean }> {
     try {
-      // Преобразуем DeliveryStatus в формат, понятный API
-      let apiStatus: string;
-      switch (status) {
-        case DeliveryStatus.PENDING:
-          apiStatus = 'В ожидании';
-          break;
-        case DeliveryStatus.ASSIGNED:
-          apiStatus = 'Назначена';
-          break;
-        case DeliveryStatus.IN_PROGRESS:
-          apiStatus = 'В пути';
-          break;
-        case DeliveryStatus.DELIVERED:
-          apiStatus = 'Доставлена';
-          break;
-        case DeliveryStatus.CANCELLED:
-          apiStatus = 'Отменена';
-          break;
-        default:
-          apiStatus = 'В ожидании';
+      // Преобразуем DeliveryStatus в status_id для API в соответствии с базой данных
+      let statusId: number;
+      if (status === DeliveryStatus.DELIVERED) {
+        statusId = 3; // ID для статуса "Доставлена"
+      } else {
+        statusId = 1; // ID для статуса "В ожидании"
       }
       
-      const response = await apiService.put<ApiDelivery>(API_CONFIG.endpoints.deliveries.status(id), { status: apiStatus });
+      // Используем новый эндпоинт для обновления статуса
+      const response = await apiService.patch<ApiDelivery>(`/deliveries/${id}/update-status/`, { status_id: statusId });
       
       return {
         success: !response.error,
@@ -150,6 +123,33 @@ class DeliveryService {
         offline: response.offline
       };
     } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  // Добавляем новый метод для прямого обновления статуса
+  async directUpdateStatus(id: number, statusId: number): Promise<{ success: boolean; error?: string; data?: ApiDelivery; offline?: boolean }> {
+    try {
+      console.log(`Прямое обновление статуса доставки ${id} на статус ${statusId}`);
+      
+      // Используем специальный эндпоинт для обновления статуса
+      const response = await apiService.patch<ApiDelivery>(`/deliveries/${id}/update-status/`, { status_id: statusId });
+      
+      if (response.data) {
+        console.log(`Статус после обновления: ${response.data.status.id} (${response.data.status.name})`);
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+      
+      return {
+        success: !response.error,
+        error: response.error,
+        offline: response.offline
+      };
+    } catch (error) {
+      console.error('Ошибка прямого обновления статуса:', error);
       return { success: false, error: (error as Error).message };
     }
   }

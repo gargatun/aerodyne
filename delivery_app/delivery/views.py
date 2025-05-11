@@ -3,7 +3,7 @@
 Предоставляет эндпоинты для работы с моделями и статистикой.
 """
 
-
+import logging
 from rest_framework import viewsets, views, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -18,7 +18,8 @@ from .models import (
     Service,
     Status,
     Delivery,
-    UserProfile
+    UserProfile,
+    User
 )
 from .serializers import (
     TransportModelSerializer,
@@ -28,6 +29,9 @@ from .serializers import (
     DeliverySerializer,
     UserProfileSerializer
 )
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 # pylint: disable=no-member
 # objects - это стандартный атрибут Django моделей
@@ -61,6 +65,54 @@ class DeliveryViewSet(viewsets.ModelViewSet):
     queryset = Delivery.objects.all()
     serializer_class = DeliverySerializer
     permission_classes = [IsAuthenticated]
+    
+    def update(self, request, *args, **kwargs):
+        """
+        Переопределение метода update для добавления логирования.
+        
+        Args:
+            request: HTTP запрос
+            
+        Returns:
+            Response: Обновленные данные или ошибка
+        """
+        logger.info(f"Попытка обновления доставки: {request.data}")
+        print(f"Попытка обновления доставки: {request.data}")
+        
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        
+        # Логируем текущее состояние
+        logger.info(f"Текущий статус: {instance.status.id} - {instance.status.name}")
+        print(f"Текущий статус: {instance.status.id} - {instance.status.name}")
+        
+        # Проверяем обновление статуса
+        status_id = request.data.get('status_id')
+        if status_id:
+            try:
+                new_status = Status.objects.get(id=status_id)
+                logger.info(f"Меняем статус на: {new_status.id} - {new_status.name}")
+                print(f"Меняем статус на: {new_status.id} - {new_status.name}")
+            except Status.DoesNotExist:
+                logger.error(f"Статус с ID={status_id} не найден")
+                print(f"Статус с ID={status_id} не найден")
+        
+        # Выполняем стандартное обновление
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        # Проверяем, что статус обновился
+        updated_instance = self.get_object()
+        logger.info(f"Обновленный статус: {updated_instance.status.id} - {updated_instance.status.name}")
+        print(f"Обновленный статус: {updated_instance.status.id} - {updated_instance.status.name}")
+        
+        if getattr(instance, '_prefetched_objects_cache', None):
+            # If 'prefetch_related' has been applied to a queryset, we need to
+            # forcibly invalidate the prefetch cache on the instance.
+            instance._prefetched_objects_cache = {}
+
+        return Response(serializer.data)
     
     @action(detail=True, methods=['patch'])
     def assign(self, request, pk=None):
@@ -225,6 +277,281 @@ class DeliveryViewSet(viewsets.ModelViewSet):
                 result.append(delivery)
         
         return Response(result)
+
+    @action(detail=True, methods=['patch'])
+    def update_status(self, request, pk=None):
+        """
+        Специальный action для обновления статуса доставки.
+        
+        Args:
+            request: HTTP запрос с status_id в теле
+            pk: ID доставки
+            
+        Returns:
+            Response: Обновленные данные доставки
+        """
+        delivery = self.get_object()
+        
+        # Получаем ID статуса из запроса
+        status_id = request.data.get('status_id')
+        if not status_id:
+            return Response(
+                {"error": "Необходимо указать status_id"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Получаем объект статуса
+            status_obj = Status.objects.get(id=status_id)
+            
+            # Обновляем статус доставки
+            old_status = delivery.status
+            print(f"Обновляем статус доставки {delivery.id} с {old_status.id} ({old_status.name}) на {status_obj.id} ({status_obj.name})")
+            
+            delivery.status = status_obj
+            delivery.save()
+            
+            # Проверяем, что статус обновился
+            delivery.refresh_from_db()
+            print(f"Статус после обновления: {delivery.status.id} ({delivery.status.name})")
+            
+            # Возвращаем обновленные данные
+            serializer = self.get_serializer(delivery)
+            return Response(serializer.data)
+        
+        except Status.DoesNotExist:
+            return Response(
+                {"error": f"Статус с ID {status_id} не найден"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+    @action(detail=True, methods=['patch'])
+    def update_all(self, request, pk=None):
+        """
+        Обновляет все поля доставки в одном запросе.
+        
+        Args:
+            request: HTTP запрос с полями для обновления
+            pk: ID доставки
+            
+        Returns:
+            Response: Обновленные данные доставки
+        """
+        delivery = self.get_object()
+        
+        logger.info(f"Обновление всех полей доставки: {request.data}")
+        print(f"Обновление всех полей доставки {delivery.id}: {request.data}")
+        
+        # Обработка связанных моделей
+        transport_model_id = request.data.get('transport_model_id')
+        packaging_id = request.data.get('packaging_id')
+        service_ids = request.data.get('service_ids', [])
+        status_id = request.data.get('status_id')
+        
+        try:
+            # Обновляем модель транспорта
+            if transport_model_id:
+                try:
+                    transport_model = TransportModel.objects.get(id=transport_model_id)
+                    delivery.transport_model = transport_model
+                    print(f"Модель транспорта установлена: {transport_model.id} ({transport_model.name})")
+                except TransportModel.DoesNotExist:
+                    return Response(
+                        {"error": f"Модель транспорта с ID {transport_model_id} не найдена"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Обновляем тип упаковки
+            if packaging_id:
+                try:
+                    packaging = PackagingType.objects.get(id=packaging_id)
+                    delivery.packaging = packaging
+                    print(f"Тип упаковки установлен: {packaging.id} ({packaging.name})")
+                except PackagingType.DoesNotExist:
+                    return Response(
+                        {"error": f"Тип упаковки с ID {packaging_id} не найден"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Обновляем услуги
+            if service_ids:
+                # Очищаем текущие услуги
+                delivery.services.clear()
+                print(f"Очищены текущие услуги")
+                
+                # Добавляем новые услуги
+                for service_id in service_ids:
+                    try:
+                        service = Service.objects.get(id=service_id)
+                        delivery.services.add(service)
+                        print(f"Добавлена услуга: {service.id} ({service.name})")
+                    except Service.DoesNotExist:
+                        print(f"Услуга с ID {service_id} не найдена")
+                        # Не прерываем выполнение, просто пропускаем эту услугу
+            
+            # Обновляем статус
+            if status_id:
+                try:
+                    status_obj = Status.objects.get(id=status_id)
+                    delivery.status = status_obj
+                    print(f"Статус установлен: {status_obj.id} ({status_obj.name})")
+                except Status.DoesNotExist:
+                    return Response(
+                        {"error": f"Статус с ID {status_id} не найден"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Обновляем прочие поля
+            for field in ['transport_number', 'start_time', 'end_time', 'distance', 
+                         'technical_condition', 'source_address', 'destination_address',
+                         'source_lat', 'source_lon', 'dest_lat', 'dest_lon']:
+                if field in request.data:
+                    setattr(delivery, field, request.data.get(field))
+                    print(f"Поле {field} установлено: {request.data.get(field)}")
+            
+            # Сохраняем доставку
+            delivery.save()
+            print(f"Доставка {delivery.id} успешно сохранена")
+            
+            # Возвращаем обновленные данные
+            serializer = self.get_serializer(delivery)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении доставки: {str(e)}")
+            print(f"Ошибка при обновлении доставки: {str(e)}")
+            return Response(
+                {"error": f"Ошибка при обновлении доставки: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=False, methods=['post'])
+    def create_simple(self, request):
+        """
+        Создает новую доставку с использованием ID связанных объектов.
+        
+        Args:
+            request: HTTP запрос с полями для создания
+            
+        Returns:
+            Response: Данные созданной доставки
+        """
+        logger.info(f"Создание новой доставки: {request.data}")
+        print(f"Создание новой доставки: {request.data}")
+        
+        # Обработка связанных моделей
+        transport_model_id = request.data.get('transport_model_id')
+        packaging_id = request.data.get('packaging_id')
+        service_ids = request.data.get('service_ids', [])
+        status_id = request.data.get('status_id')
+        courier_id = request.data.get('courier_id')
+        
+        try:
+            # Получаем модель транспорта
+            if not transport_model_id:
+                return Response(
+                    {"error": "Необходимо указать transport_model_id"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                transport_model = TransportModel.objects.get(id=transport_model_id)
+                print(f"Модель транспорта: {transport_model.id} ({transport_model.name})")
+            except TransportModel.DoesNotExist:
+                return Response(
+                    {"error": f"Модель транспорта с ID {transport_model_id} не найдена"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Получаем тип упаковки
+            if not packaging_id:
+                return Response(
+                    {"error": "Необходимо указать packaging_id"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                packaging = PackagingType.objects.get(id=packaging_id)
+                print(f"Тип упаковки: {packaging.id} ({packaging.name})")
+            except PackagingType.DoesNotExist:
+                return Response(
+                    {"error": f"Тип упаковки с ID {packaging_id} не найден"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Получаем статус
+            if not status_id:
+                return Response(
+                    {"error": "Необходимо указать status_id"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                status_obj = Status.objects.get(id=status_id)
+                print(f"Статус: {status_obj.id} ({status_obj.name})")
+            except Status.DoesNotExist:
+                return Response(
+                    {"error": f"Статус с ID {status_id} не найден"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Получаем курьера (если указан)
+            courier = None
+            if courier_id:
+                try:
+                    courier = User.objects.get(id=courier_id)
+                    print(f"Курьер: {courier.id} ({courier.username})")
+                except User.DoesNotExist:
+                    return Response(
+                        {"error": f"Курьер с ID {courier_id} не найден"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Создаем новую доставку
+            delivery = Delivery(
+                transport_model=transport_model,
+                packaging=packaging,
+                status=status_obj,
+                courier=courier,
+                transport_number=request.data.get('transport_number', ''),
+                start_time=request.data.get('start_time'),
+                end_time=request.data.get('end_time'),
+                distance=request.data.get('distance', 0),
+                technical_condition=request.data.get('technical_condition', 'Исправно'),
+                source_address=request.data.get('source_address', ''),
+                destination_address=request.data.get('destination_address', ''),
+                source_lat=request.data.get('source_lat'),
+                source_lon=request.data.get('source_lon'),
+                dest_lat=request.data.get('dest_lat'),
+                dest_lon=request.data.get('dest_lon')
+            )
+            
+            # Сохраняем доставку
+            delivery.save()
+            print(f"Доставка создана с ID: {delivery.id}")
+            
+            # Добавляем услуги
+            if service_ids:
+                for service_id in service_ids:
+                    try:
+                        service = Service.objects.get(id=service_id)
+                        delivery.services.add(service)
+                        print(f"Добавлена услуга: {service.id} ({service.name})")
+                    except Service.DoesNotExist:
+                        print(f"Услуга с ID {service_id} не найдена")
+                        # Не прерываем выполнение, просто пропускаем эту услугу
+            
+            # Возвращаем созданную доставку
+            serializer = self.get_serializer(delivery)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при создании доставки: {str(e)}")
+            print(f"Ошибка при создании доставки: {str(e)}")
+            return Response(
+                {"error": f"Ошибка при создании доставки: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class AvailableDeliveriesView(views.APIView):
     """Представление для получения доступных доставок."""

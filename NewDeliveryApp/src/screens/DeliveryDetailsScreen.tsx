@@ -3,14 +3,18 @@ import { View, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { Text, TextInput, Button, Card, Snackbar, ProgressBar, Chip, HelperText, Menu, Divider } from 'react-native-paper';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { DeliveryStatus } from '../types';
 import { deliveryService } from '../services/deliveryService';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { apiService } from '../services/api';
 import { API_CONFIG } from '../config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { STORAGE_KEYS } from '../constants';
 
 type DeliveryDetailsParams = {
   deliveryId: number;
+  onStatusChange?: () => void;
 };
 
 type DeliveryDetailsScreenRouteProp = RouteProp<{ DeliveryDetails: DeliveryDetailsParams }, 'DeliveryDetails'>;
@@ -37,12 +41,31 @@ interface DeliveryDetailsResponse {
   dest_lon?: number;
 }
 
+// Добавляем интерфейсы для справочных данных
+interface TransportModel {
+  id: number;
+  name: string;
+}
+
+interface PackagingType {
+  id: number;
+  name: string;
+}
+
+interface Service {
+  id: number;
+  name: string;
+}
+
+interface StatusOption {
+  id: number;
+  name: string;
+  color: string;
+}
+
 const statusOptions = [
   { label: 'В ожидании', value: '1' },
-  { label: 'Назначена', value: '2' },
-  { label: 'В пути', value: '3' },
-  { label: 'Доставлена', value: '4' },
-  { label: 'Отменена', value: '5' },
+  { label: 'Доставлена', value: '3' }
 ];
 
 const technicalConditionOptions = [
@@ -54,7 +77,7 @@ const DeliveryDetailsScreen = () => {
   const route = useRoute<DeliveryDetailsScreenRouteProp>();
   const navigation = useNavigation();
   const { isOffline } = useNetworkStatus();
-  const { deliveryId } = route.params;
+  const { deliveryId, onStatusChange } = route.params;
 
   const [delivery, setDelivery] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -62,7 +85,18 @@ const DeliveryDetailsScreen = () => {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   
+  // Состояния для справочных данных
+  const [transportModels, setTransportModels] = useState<TransportModel[]>([]);
+  const [packagingTypes, setPackagingTypes] = useState<PackagingType[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [statusesFromApi, setStatusesFromApi] = useState<StatusOption[]>([]);
+  
   // Состояния для редактируемых полей
+  const [selectedTransportModel, setSelectedTransportModel] = useState<TransportModel | null>(null);
+  const [selectedPackaging, setSelectedPackaging] = useState<PackagingType | null>(null);
+  const [selectedServices, setSelectedServices] = useState<Service[]>([]);
+  const [transportNumber, setTransportNumber] = useState('');
+  const [distance, setDistance] = useState('');
   const [sourceAddress, setSourceAddress] = useState('');
   const [destAddress, setDestAddress] = useState('');
   const [sourceLat, setSourceLat] = useState('');
@@ -72,13 +106,62 @@ const DeliveryDetailsScreen = () => {
   const [status, setStatus] = useState('');
   const [technicalCondition, setTechnicalCondition] = useState('');
   
+  // Состояния для выбора даты и времени
+  const [startDate, setStartDate] = useState(new Date());
+  const [endDate, setEndDate] = useState(new Date());
+  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  
   // Состояние для выпадающих меню
   const [statusMenuVisible, setStatusMenuVisible] = useState(false);
   const [technicalConditionMenuVisible, setTechnicalConditionMenuVisible] = useState(false);
+  const [transportMenuVisible, setTransportMenuVisible] = useState(false);
+  const [packagingMenuVisible, setPackagingMenuVisible] = useState(false);
+  const [serviceMenuVisible, setServiceMenuVisible] = useState(false);
+
+  // Добавим переменную состояния для отладки
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   useEffect(() => {
     fetchDeliveryDetails();
+    loadReferenceData();
   }, [deliveryId]);
+
+  const loadReferenceData = async () => {
+    try {
+      // Загружаем все справочные данные параллельно
+      const [
+        transportModelsResponse,
+        packagingTypesResponse,
+        servicesResponse,
+        statusesResponse
+      ] = await Promise.all([
+        apiService.get<TransportModel[]>('/transport-models/'),
+        apiService.get<PackagingType[]>('/packaging-types/'),
+        apiService.get<Service[]>('/services/'),
+        apiService.get<StatusOption[]>('/statuses/'),
+      ]);
+      
+      if (transportModelsResponse.data) {
+        setTransportModels(transportModelsResponse.data);
+      }
+      
+      if (packagingTypesResponse.data) {
+        setPackagingTypes(packagingTypesResponse.data);
+      }
+      
+      if (servicesResponse.data) {
+        setServices(servicesResponse.data);
+      }
+      
+      if (statusesResponse.data) {
+        setStatusesFromApi(statusesResponse.data);
+      }
+    } catch (err) {
+      setError('Ошибка загрузки справочных данных');
+      console.error(err);
+    }
+  };
 
   const fetchDeliveryDetails = async () => {
     setLoading(true);
@@ -100,13 +183,40 @@ const DeliveryDetailsScreen = () => {
         // Получаем дополнительные данные через API для полей, которых нет в текущем маппинге deliveryService
         const detailsResponse = await apiService.get<DeliveryDetailsResponse>(`/deliveries/${deliveryId}/`);
         if (detailsResponse.data) {
-          // Устанавливаем статус как ID, а не строковое значение
-          setStatus(detailsResponse.data.status?.id?.toString() || '');
-          setTechnicalCondition(detailsResponse.data.technical_condition || '');
-          setSourceLat(detailsResponse.data.source_lat?.toString() || '');
-          setSourceLon(detailsResponse.data.source_lon?.toString() || '');
-          setDestLat(detailsResponse.data.dest_lat?.toString() || '');
-          setDestLon(detailsResponse.data.dest_lon?.toString() || '');
+          const apiDelivery = detailsResponse.data;
+          
+          // Устанавливаем значения полей из ответа API
+          setStatus(apiDelivery.status?.id?.toString() || '');
+          setTechnicalCondition(apiDelivery.technical_condition || '');
+          setSourceLat(apiDelivery.source_lat?.toString() || '');
+          setSourceLon(apiDelivery.source_lon?.toString() || '');
+          setDestLat(apiDelivery.dest_lat?.toString() || '');
+          setDestLon(apiDelivery.dest_lon?.toString() || '');
+          setTransportNumber(apiDelivery.transport_number || '');
+          setDistance(apiDelivery.distance?.toString() || '');
+          
+          // Установка дат
+          if (apiDelivery.start_time) {
+            setStartDate(new Date(apiDelivery.start_time));
+          }
+          if (apiDelivery.end_time) {
+            setEndDate(new Date(apiDelivery.end_time));
+          }
+          
+          // Установка модели транспорта
+          if (apiDelivery.transport_model) {
+            setSelectedTransportModel(apiDelivery.transport_model);
+          }
+          
+          // Установка упаковки
+          if (apiDelivery.packaging) {
+            setSelectedPackaging(apiDelivery.packaging);
+          }
+          
+          // Установка услуг
+          if (apiDelivery.services) {
+            setSelectedServices(apiDelivery.services);
+          }
         }
       }
     } catch (err) {
@@ -117,9 +227,30 @@ const DeliveryDetailsScreen = () => {
     }
   };
 
+  const handleStartDateConfirm = (selectedDate: Date) => {
+    setShowStartDatePicker(false);
+    setStartDate(selectedDate);
+  };
+
+  const handleEndDateConfirm = (selectedDate: Date) => {
+    setShowEndDatePicker(false);
+    setEndDate(selectedDate);
+  };
+
+  const toggleService = (service: Service) => {
+    const isSelected = selectedServices.some(s => s.id === service.id);
+    if (isSelected) {
+      setSelectedServices(selectedServices.filter(s => s.id !== service.id));
+    } else {
+      setSelectedServices([...selectedServices, service]);
+    }
+    setServiceMenuVisible(false);
+  };
+
   const handleSaveChanges = async () => {
     setSaving(true);
     setError('');
+    setDebugInfo('');
     
     try {
       // Проверяем наличие данных о доставке
@@ -129,7 +260,35 @@ const DeliveryDetailsScreen = () => {
         return;
       }
       
-      // Получаем дополнительные данные о доставке напрямую через API
+      // Проверка обязательных полей
+      if (!selectedTransportModel) {
+        setError('Выберите модель транспорта');
+        setSaving(false);
+        return;
+      }
+      
+      if (!selectedPackaging) {
+        setError('Выберите тип упаковки');
+        setSaving(false);
+        return;
+      }
+      
+      if (!transportNumber) {
+        setError('Введите номер транспорта');
+        setSaving(false);
+        return;
+      }
+      
+      if (!distance) {
+        setError('Введите расстояние');
+        setSaving(false);
+        return;
+      }
+      
+      // Получаем ID статуса
+      const statusId = typeof status === 'string' ? parseInt(status) : status;
+
+      // Получаем текущее состояние доставки для сравнения
       const detailsResponse = await apiService.get<DeliveryDetailsResponse>(`/deliveries/${deliveryId}/`);
       
       if (detailsResponse.error) {
@@ -138,7 +297,6 @@ const DeliveryDetailsScreen = () => {
         return;
       }
       
-      // Проверяем наличие необходимых данных в полном ответе API
       if (!detailsResponse.data) {
         setError('Не удалось получить полные данные о доставке');
         setSaving(false);
@@ -146,69 +304,158 @@ const DeliveryDetailsScreen = () => {
       }
       
       const apiDelivery = detailsResponse.data;
+      setDebugInfo(`Текущие данные доставки: ID=${apiDelivery.id}, статус=${apiDelivery.status.id}`);
       
-      // Проверяем поле transport_model_id
-      if (!apiDelivery.transport_model || !apiDelivery.transport_model.id) {
-        setError('Отсутствуют данные о модели транспорта');
+      // Проверяем обязательно наличие всех объектов перед отправкой
+      if (!selectedTransportModel || !selectedPackaging) {
+        setError('Не все обязательные данные заполнены');
         setSaving(false);
         return;
       }
       
-      // Получаем ID статуса
-      const statusId = typeof status === 'string' ? parseInt(status) || apiDelivery.status?.id : status;
-      
-      // При обновлении отправляем только идентификаторы объектов, чтобы избежать ошибок уникальности
-      const updateData = {
-        id: deliveryId,
-        transport_model_id: apiDelivery.transport_model.id,
-        transport_number: apiDelivery.transport_number,
-        start_time: apiDelivery.start_time,
-        end_time: apiDelivery.end_time,
-        distance: apiDelivery.distance,
-        service_ids: apiDelivery.services ? apiDelivery.services.map((service: {id: number}) => service.id) : [],
-        packaging_id: apiDelivery.packaging?.id,
-        status_id: statusId,
-        courier_id: apiDelivery.courier?.id || null,
-        source_address: sourceAddress || '',
-        destination_address: destAddress || '',
-        source_lat: sourceLat ? parseFloat(sourceLat) : null,
-        source_lon: sourceLon ? parseFloat(sourceLon) : null,
-        dest_lat: destLat ? parseFloat(destLat) : null,
-        dest_lon: destLon ? parseFloat(destLon) : null,
-        technical_condition: technicalCondition || apiDelivery.technical_condition
+      // Собираем все данные в один объект для обновления с явным приведением типов
+      const updateData: Record<string, any> = {
+        id: Number(deliveryId),
+        transport_model_id: Number(selectedTransportModel.id),
+        transport_number: String(transportNumber),
+        start_time: startDate.toISOString().split('.')[0] + 'Z',
+        end_time: endDate.toISOString().split('.')[0] + 'Z',
+        distance: Number(parseFloat(distance)),
+        service_ids: selectedServices.map(service => Number(service.id)),
+        packaging_id: Number(selectedPackaging.id),
+        courier_id: apiDelivery.courier?.id ? Number(apiDelivery.courier.id) : null,
+        source_address: String(sourceAddress || ''),
+        destination_address: String(destAddress || ''),
+        source_lat: sourceLat ? Number(parseFloat(sourceLat)) : null,
+        source_lon: sourceLon ? Number(parseFloat(sourceLon)) : null,
+        dest_lat: destLat ? Number(parseFloat(destLat)) : null,
+        dest_lon: destLon ? Number(parseFloat(destLon)) : null,
+        technical_condition: technicalCondition ? String(technicalCondition) : String(apiDelivery.technical_condition || 'Исправно')
       };
       
-      console.log('Отправляемые данные доставки:', updateData);
+      // Подробное логирование всех отправляемых параметров
+      setDebugInfo(prev => prev + `
+\nОтправляемые параметры:
+- Модель транспорта ID: ${updateData.transport_model_id}
+- Тип упаковки ID: ${updateData.packaging_id}
+- Услуги IDs: ${JSON.stringify(updateData.service_ids)}
+- Техническое состояние: ${updateData.technical_condition}
+- Номер транспорта: ${updateData.transport_number}
+- Расстояние: ${updateData.distance}
+- Адрес отправления: ${updateData.source_address}
+- Адрес назначения: ${updateData.destination_address}
+      `);
       
-      // Отправляем запрос на обновление
-      const response = await apiService.put(`/deliveries/${deliveryId}/`, updateData);
+      // Отправляем запрос на обновление через PATCH
+      console.log('Отправляемые данные доставки:', JSON.stringify(updateData));
       
-      if (response.error) {
-        // Если ошибка содержит детали о требуемых полях, выводим более подробную информацию
-        if (response.error.includes('400') || response.error.includes('Bad Request')) {
-          try {
-            const errorData = JSON.parse(response.error.split('Body:')[1].trim());
-            let errorMessage = 'Ошибка: ';
-            
-            // Проверяем все поля с ошибками
-            Object.keys(errorData).forEach(key => {
-              errorMessage += `${key}: ${errorData[key].join(', ')}; `;
-            });
-            
-            setError(errorMessage);
-          } catch (parseError) {
-            setError(`Ошибка валидации: ${response.error}`);
-          }
-        } else {
-          setError(response.error);
+      // Прямой вызов fetch для обновления
+      setDebugInfo(prev => prev + '\nИспользуем прямой вызов fetch для PATCH запроса');
+      
+      try {
+        const headers = new Headers({
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await AsyncStorage.getItem(STORAGE_KEYS.USER_TOKEN)}`
+        });
+        
+        // Используем новый эндпоинт update-all для обновления всех полей одновременно
+        setDebugInfo(prev => prev + '\nИспользуем специальный эндпоинт update-all для обновления всех параметров');
+        
+        const response = await fetch(`${API_CONFIG.baseURL}/deliveries/${deliveryId}/update-all/`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(updateData)
+        });
+        
+        const responseText = await response.text();
+        console.log('Ответ от сервера (текст):', responseText);
+        
+        if (!response.ok) {
+          setError(`Ошибка обновления данных: ${response.status} ${responseText}`);
+          setDebugInfo(prev => prev + `\nОшибка обновления: ${response.status} ${responseText}`);
+          setSaving(false);
+          return;
         }
+        
+        let responseData;
+        try {
+          responseData = JSON.parse(responseText);
+          console.log('Распарсенные данные ответа:', responseData);
+        } catch (e) {
+          console.error('Ошибка парсинга JSON ответа:', e);
+          responseData = { message: 'Данные обновлены, но не удалось распарсить ответ' };
+        }
+        
+        setDebugInfo(prev => prev + `\nДанные успешно обновлены. Ответ: ${JSON.stringify(responseData).substring(0, 150)}...`);
+      } catch (error) {
+        console.error('Ошибка отправки PATCH запроса:', error);
+        setError(`Ошибка отправки запроса: ${(error as Error).message}`);
+        setDebugInfo(prev => prev + `\nОшибка отправки запроса: ${(error as Error).message}`);
+        setSaving(false);
         return;
       }
       
+      // Обновляем статус отдельным запросом, если он изменился
+      const currentStatusId = apiDelivery.status.id;
+      if (statusId && statusId !== currentStatusId) {
+        setDebugInfo(prev => prev + `\nТекущий статус: ${currentStatusId}, новый статус: ${statusId}`);
+        
+        const statusUpdateData = { status_id: statusId };
+        
+        try {
+          const headers = new Headers({
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await AsyncStorage.getItem(STORAGE_KEYS.USER_TOKEN)}`
+          });
+          
+          setDebugInfo(prev => prev + `\nОтправка запроса на обновление статуса...`);
+          
+          const statusResponse = await fetch(`${API_CONFIG.baseURL}/deliveries/${deliveryId}/update-status/`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify(statusUpdateData)
+          });
+          
+          const statusResponseText = await statusResponse.text();
+          console.log('Ответ на запрос обновления статуса (текст):', statusResponseText);
+          
+          if (!statusResponse.ok) {
+            setError(`Данные обновлены, но не удалось обновить статус: ${statusResponse.status} ${statusResponseText}`);
+            setDebugInfo(prev => prev + `\nОшибка обновления статуса: ${statusResponse.status} ${statusResponseText}`);
+            setSaving(false);
+            return;
+          }
+          
+          let statusResponseData;
+          try {
+            statusResponseData = JSON.parse(statusResponseText);
+            console.log('Распарсенные данные ответа статуса:', statusResponseData);
+          } catch (e) {
+            console.error('Ошибка парсинга JSON ответа статуса:', e);
+            statusResponseData = { message: 'Статус обновлен, но не удалось распарсить ответ' };
+          }
+          
+          setDebugInfo(prev => prev + `\nСтатус успешно обновлен на ${statusId}. Ответ: ${JSON.stringify(statusResponseData).substring(0, 100)}...`);
+        } catch (error) {
+          console.error('Ошибка отправки запроса обновления статуса:', error);
+          setError(`Данные обновлены, но ошибка обновления статуса: ${(error as Error).message}`);
+          setDebugInfo(prev => prev + `\nОшибка отправки запроса статуса: ${(error as Error).message}`);
+          setSaving(false);
+          return;
+        }
+      }
+      
       setSuccessMessage('Доставка успешно обновлена');
-      fetchDeliveryDetails(); // Перезагружаем данные
+      
+      // Перезагружаем данные
+      await fetchDeliveryDetails();
+      
+      // Вызываем колбэк для обновления списков
+      if (onStatusChange) {
+        onStatusChange();
+      }
     } catch (err) {
-      setError('Ошибка при сохранении изменений');
+      setError(`Ошибка при сохранении изменений: ${(err as Error).message}`);
       console.error(err);
     } finally {
       setSaving(false);
@@ -271,6 +518,43 @@ const DeliveryDetailsScreen = () => {
     }
   };
 
+  const handleMarkAsDelivered = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      setSuccessMessage('');
+      setDebugInfo('Пытаемся пометить доставку как "Доставлено"...');
+      
+      // Используем новый метод для прямого обновления статуса
+      const result = await deliveryService.directUpdateStatus(deliveryId, 3);
+      
+      if (result.success && result.data) {
+        setSuccessMessage('Доставка успешно отмечена как "Доставлено"');
+        setDebugInfo(prev => prev + `\nОбновление успешно. Новый статус: ${result.data?.status?.id || 'неизвестно'} (${result.data?.status?.name || 'неизвестно'})`);
+        
+        // Обновляем статус на экране
+        setStatus('3');
+        
+        // Перезагружаем данные
+        await fetchDeliveryDetails();
+        
+        // Вызываем колбэк для обновления списков
+        if (onStatusChange) {
+          onStatusChange();
+        }
+      } else {
+        setError(result.error || 'Не удалось обновить статус');
+        setDebugInfo(prev => prev + `\nОшибка обновления: ${result.error}`);
+      }
+    } catch (error) {
+      const errorMessage = (error as Error).message;
+      setError(`Ошибка: ${errorMessage}`);
+      setDebugInfo(prev => prev + `\nИсключение: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -298,6 +582,140 @@ const DeliveryDetailsScreen = () => {
         <Card.Content>
           <Text style={styles.sectionTitle}>Основная информация</Text>
           
+          <View style={styles.formGroup}>
+            <Text>Модель транспорта:</Text>
+            <Menu
+              visible={transportMenuVisible}
+              onDismiss={() => setTransportMenuVisible(false)}
+              anchor={
+                <Chip 
+                  onPress={() => setTransportMenuVisible(true)} 
+                  style={styles.chip}
+                >
+                  {selectedTransportModel?.name || 'Выберите модель транспорта'}
+                </Chip>
+              }
+            >
+              {transportModels.map(model => (
+                <Menu.Item
+                  key={model.id}
+                  onPress={() => {
+                    setSelectedTransportModel(model);
+                    setTransportMenuVisible(false);
+                  }}
+                  title={model.name}
+                />
+              ))}
+            </Menu>
+          </View>
+          
+          <TextInput
+            label="Номер транспорта"
+            value={transportNumber}
+            onChangeText={setTransportNumber}
+            mode="outlined"
+            style={styles.input}
+          />
+          
+          <View style={styles.formGroup}>
+            <Text>Тип упаковки:</Text>
+            <Menu
+              visible={packagingMenuVisible}
+              onDismiss={() => setPackagingMenuVisible(false)}
+              anchor={
+                <Chip 
+                  onPress={() => setPackagingMenuVisible(true)} 
+                  style={styles.chip}
+                >
+                  {selectedPackaging?.name || 'Выберите тип упаковки'}
+                </Chip>
+              }
+            >
+              {packagingTypes.map(packaging => (
+                <Menu.Item
+                  key={packaging.id}
+                  onPress={() => {
+                    setSelectedPackaging(packaging);
+                    setPackagingMenuVisible(false);
+                  }}
+                  title={packaging.name}
+                />
+              ))}
+            </Menu>
+          </View>
+          
+          <View style={styles.formGroup}>
+            <Text>Услуги:</Text>
+            <Menu
+              visible={serviceMenuVisible}
+              onDismiss={() => setServiceMenuVisible(false)}
+              anchor={
+                <Chip 
+                  onPress={() => setServiceMenuVisible(true)} 
+                  style={styles.chip}
+                >
+                  {selectedServices.length > 0 
+                    ? `Выбрано услуг: ${selectedServices.length}` 
+                    : 'Выберите услуги'}
+                </Chip>
+              }
+            >
+              {services.map(service => {
+                const isSelected = selectedServices.some(s => s.id === service.id);
+                return (
+                  <Menu.Item
+                    key={service.id}
+                    onPress={() => toggleService(service)}
+                    title={`${service.name} ${isSelected ? '✓' : ''}`}
+                  />
+                );
+              })}
+            </Menu>
+          </View>
+          
+          <TextInput
+            label="Расстояние (км)"
+            value={distance}
+            onChangeText={setDistance}
+            mode="outlined"
+            style={styles.input}
+            keyboardType="numeric"
+          />
+          
+          <View style={styles.formGroup}>
+            <Text>Время начала:</Text>
+            <Chip 
+              onPress={() => setShowStartDatePicker(true)} 
+              style={styles.chip}
+            >
+              {startDate.toLocaleString()}
+            </Chip>
+            <DateTimePickerModal
+              isVisible={showStartDatePicker}
+              mode="datetime"
+              onConfirm={handleStartDateConfirm}
+              onCancel={() => setShowStartDatePicker(false)}
+              date={startDate}
+            />
+          </View>
+          
+          <View style={styles.formGroup}>
+            <Text>Время окончания:</Text>
+            <Chip 
+              onPress={() => setShowEndDatePicker(true)} 
+              style={styles.chip}
+            >
+              {endDate.toLocaleString()}
+            </Chip>
+            <DateTimePickerModal
+              isVisible={showEndDatePicker}
+              mode="datetime"
+              onConfirm={handleEndDateConfirm}
+              onCancel={() => setShowEndDatePicker(false)}
+              date={endDate}
+            />
+          </View>
+          
           <View style={styles.statusContainer}>
             <Text>Статус:</Text>
             <Menu
@@ -308,20 +726,22 @@ const DeliveryDetailsScreen = () => {
                   onPress={() => setStatusMenuVisible(true)} 
                   style={styles.statusChip}
                 >
-                  {statusOptions.find(option => option.value === status)?.label || 'Выберите статус'}
+                  {statusesFromApi.find(s => s.id === Number(status))?.name || 'Выберите статус'}
                 </Chip>
               }
             >
-              {statusOptions.map(option => (
-                <Menu.Item
-                  key={option.value}
-                  onPress={() => {
-                    setStatus(option.value);
-                    setStatusMenuVisible(false);
-                  }}
-                  title={option.label}
-                />
-              ))}
+              {statusesFromApi
+                .filter(statusObj => statusObj.id === 1 || statusObj.id === 3)
+                .map(statusObj => (
+                  <Menu.Item
+                    key={statusObj.id}
+                    onPress={() => {
+                      setStatus(statusObj.id.toString());
+                      setStatusMenuVisible(false);
+                    }}
+                    title={statusObj.name}
+                  />
+                ))}
             </Menu>
           </View>
           
@@ -450,6 +870,16 @@ const DeliveryDetailsScreen = () => {
             Сохранить изменения
           </Button>
           
+          <Button 
+            mode="contained" 
+            onPress={handleMarkAsDelivered}
+            loading={loading}
+            disabled={loading || isOffline}
+            style={[styles.saveButton, { marginTop: 10, backgroundColor: '#388E3C' }]}
+          >
+            Пометить как доставлено
+          </Button>
+          
           {isOffline && (
             <HelperText type="error">
               Вы находитесь в офлайн-режиме. Изменения будут сохранены при подключении к интернету.
@@ -479,6 +909,15 @@ const DeliveryDetailsScreen = () => {
       >
         {successMessage}
       </Snackbar>
+
+      {/* Добавляем отладочную информацию */}
+      {debugInfo && (
+        <Card style={{ marginTop: 16, backgroundColor: '#f5f5f5' }}>
+          <Card.Content>
+            <Text style={{ fontFamily: 'monospace' }}>{debugInfo}</Text>
+          </Card.Content>
+        </Card>
+      )}
     </ScrollView>
   );
 };
@@ -550,6 +989,9 @@ const styles = StyleSheet.create({
   mediaInfo: {
     marginBottom: 8,
     fontStyle: 'italic',
+  },
+  chip: {
+    marginLeft: 8,
   },
 });
 

@@ -137,10 +137,13 @@ aerodyne/
 - `/api/deliveries/my/history/` - История доставок курьера
 - `/api/deliveries/{id}/` - Детали конкретной доставки
 - `/api/deliveries/` - Создание новой доставки (POST)
+- `/api/deliveries/create_simple/` - Создание доставки с использованием ID связанных объектов (POST)
 - `/api/deliveries/{id}/` - Обновление существующей доставки (PUT)
 - `/api/deliveries/{id}/assign/` - Назначить доставку курьеру
 - `/api/deliveries/{id}/unassign/` - Отменить назначение доставки
 - `/api/deliveries/{id}/media/` - Загрузка медиафайлов для доставки
+- `/api/deliveries/{id}/update-status/` - Обновление статуса доставки (PATCH)
+- `/api/deliveries/{id}/update-all/` - Полное обновление всех полей доставки (PATCH)
 - `/api/deliveries/sync/` - Синхронизация данных о доставках
 - `/api/deliveries/coordinates/` - Получение координат всех доставок
 

@@ -183,7 +183,7 @@ const CreateDeliveryScreen = () => {
       console.log('Отправляемые данные доставки:', deliveryData);
       
       // Отправка запроса на создание доставки
-      const response = await apiService.post('/deliveries/', deliveryData);
+      const response = await apiService.post('/deliveries/create_simple/', deliveryData);
       
       if (response.error) {
         // Если ошибка содержит детали о требуемых полях, выводим более подробную информацию

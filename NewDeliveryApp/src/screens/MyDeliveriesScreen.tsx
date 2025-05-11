@@ -108,26 +108,14 @@ const MyDeliveriesScreen = () => {
   
   const mapApiDataToDeliveries = (apiData: any[]): Delivery[] => {
     return apiData.map(apiDelivery => {
-      // Маппинг статуса API в DeliveryStatus
+      // Маппинг статуса API в DeliveryStatus на основе ID статуса
       let status: DeliveryStatus;
-      switch (apiDelivery.status.name) {
-        case 'В ожидании':
-          status = DeliveryStatus.PENDING;
-          break;
-        case 'Назначена':
-          status = DeliveryStatus.ASSIGNED;
-          break;
-        case 'В пути':
-          status = DeliveryStatus.IN_PROGRESS;
-          break;
-        case 'Доставлена':
-          status = DeliveryStatus.DELIVERED;
-          break;
-        case 'Отменена':
-          status = DeliveryStatus.CANCELLED;
-          break;
-        default:
-          status = DeliveryStatus.PENDING;
+      const statusId = apiDelivery.status.id;
+      
+      if (statusId === 3) {
+        status = DeliveryStatus.DELIVERED;
+      } else {
+        status = DeliveryStatus.PENDING;
       }
 
       return {
@@ -168,23 +156,24 @@ const MyDeliveriesScreen = () => {
   };
 
   const navigateToDeliveryDetails = (deliveryId: number) => {
-    navigation.navigate('DeliveryDetails', { deliveryId });
+    navigation.navigate('DeliveryDetails', { 
+      deliveryId,
+      onStatusChange: () => {
+        // Обновляем оба списка при изменении статуса
+        fetchActiveDeliveries();
+        fetchHistoryDeliveries();
+      }
+    });
   };
 
   const getStatusName = (status: DeliveryStatus): string => {
     switch (status) {
       case DeliveryStatus.PENDING:
         return 'Ожидает';
-      case DeliveryStatus.ASSIGNED:
-        return 'Назначена';
-      case DeliveryStatus.IN_PROGRESS:
-        return 'В пути';
       case DeliveryStatus.DELIVERED:
         return 'Доставлена';
-      case DeliveryStatus.CANCELLED:
-        return 'Отменена';
       default:
-        return 'Неизвестно';
+        return 'Ожидает';
     }
   };
 
@@ -192,16 +181,10 @@ const MyDeliveriesScreen = () => {
     switch (status) {
       case DeliveryStatus.PENDING:
         return '#FFA000';
-      case DeliveryStatus.ASSIGNED:
-        return '#2196F3';
-      case DeliveryStatus.IN_PROGRESS:
-        return '#7B1FA2';
       case DeliveryStatus.DELIVERED:
         return '#388E3C';
-      case DeliveryStatus.CANCELLED:
-        return '#D32F2F';
       default:
-        return '#757575';
+        return '#FFA000';
     }
   };
 

@@ -122,25 +122,74 @@ class DeliverySerializer(serializers.ModelSerializer):
         status_data = validated_data.pop('status', None)
         courier_data = validated_data.pop('courier', None)
 
-        if transport_model_data:
+        # Обработка ID полей для прямого обновления связанных объектов
+        transport_model_id = validated_data.pop('transport_model_id', None)
+        packaging_id = validated_data.pop('packaging_id', None)
+        service_ids = validated_data.pop('service_ids', None)
+        status_id = validated_data.pop('status_id', None)
+        courier_id = validated_data.pop('courier_id', None)
+
+        # Прямое обновление по ID имеет приоритет над обновлением через объекты
+        if transport_model_id:
+            try:
+                instance.transport_model = TransportModel.objects.get(id=transport_model_id)
+            except TransportModel.DoesNotExist:
+                pass
+        elif transport_model_data:
             transport_model, _ = TransportModel.objects.get_or_create(**transport_model_data)
             instance.transport_model = transport_model
-        if packaging_data:
+            
+        if packaging_id:
+            try:
+                instance.packaging = PackagingType.objects.get(id=packaging_id)
+            except PackagingType.DoesNotExist:
+                pass
+        elif packaging_data:
             packaging, _ = PackagingType.objects.get_or_create(**packaging_data)
             instance.packaging = packaging
-        if status_data:
+            
+        if status_id:
+            try:
+                print(f"Пытаемся найти статус с ID {status_id}")
+                status_obj = Status.objects.get(id=status_id)
+                print(f"Найден статус: {status_obj.id} - {status_obj.name}")
+                instance.status = status_obj
+            except Status.DoesNotExist:
+                print(f"Статус с ID {status_id} не найден")
+                pass
+        elif status_data:
             status, _ = Status.objects.get_or_create(**status_data)
             instance.status = status
-        if courier_data:
+            
+        if courier_id:
+            try:
+                instance.courier = User.objects.get(id=courier_id) if courier_id else None
+            except User.DoesNotExist:
+                instance.courier = None
+        elif courier_data:
             instance.courier = User.objects.get(**courier_data) if courier_data else None
-        if services_data:
+            
+        if service_ids:
+            instance.services.clear()
+            for service_id in service_ids:
+                try:
+                    service = Service.objects.get(id=service_id)
+                    instance.services.add(service)
+                except Service.DoesNotExist:
+                    pass
+        elif services_data:
             instance.services.clear()
             for service_data in services_data:
                 service, _ = Service.objects.get_or_create(**service_data)
                 instance.services.add(service)
 
+        print("Валидированные данные для обновления:", validated_data)
+
         for attr, value in validated_data.items():
+            print(f"Устанавливаем атрибут {attr} = {value}")
             setattr(instance, attr, value)
 
+        print(f"Сохраняем доставку с ID={instance.id}, status={instance.status.id}")
         instance.save()
+        print(f"Доставка сохранена, текущий статус: {instance.status.id} - {instance.status.name}")
         return instance
