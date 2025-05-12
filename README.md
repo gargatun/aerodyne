@@ -1,46 +1,62 @@
 # Aerodyne - Система доставки
 
-Проект состоит из двух частей:
+Проект состоит из трех частей:
 1. Django backend API (delivery_app)
 2. React Native мобильное приложение (NewDeliveryApp)
+3. Web-приложение для отчетов (delivery-report-web)
 
 ## Структура проекта
 
 ```
 aerodyne/
-├── delivery_app/         # Django бэкенд
-│   ├── api/              # API эндпоинты
-│   ├── core/             # Основные модели и функции
+├── delivery_app/           # Django бэкенд
+│   ├── api/                # API эндпоинты
+│   ├── core/               # Основные модели и функции
 │   └── ...
-├── NewDeliveryApp/       # React Native мобильное приложение
-│   ├── src/              # Исходный код приложения
-│   │   ├── components/   # Переиспользуемые компоненты
-│   │   ├── screens/      # Экраны приложения
-│   │   ├── services/     # Сервисы для работы с API и данными
-│   │   ├── navigation/   # Навигация приложения
-│   │   ├── types/        # TypeScript типы
-│   │   ├── utils/        # Вспомогательные функции
-│   │   └── config.ts     # Конфигурация приложения
-│   ├── android/          # Android-специфичный код
-│   ├── ios/              # iOS-специфичный код
+├── NewDeliveryApp/         # React Native мобильное приложение
+│   ├── src/                # Исходный код приложения
+│   │   ├── components/     # Переиспользуемые компоненты
+│   │   ├── screens/        # Экраны приложения
+│   │   ├── services/       # Сервисы для работы с API и данными
+│   │   ├── navigation/     # Навигация приложения
+│   │   ├── types/          # TypeScript типы
+│   │   ├── utils/          # Вспомогательные функции
+│   │   └── config.ts       # Конфигурация приложения
+│   ├── android/            # Android-специфичный код
+│   ├── ios/                # iOS-специфичный код
 │   └── ...
-├── requirements.txt      # Python зависимости
-└── README.md             # Этот файл
+├── delivery-report-web/    # Web-приложение для отчетов
+│   ├── src/                # Исходный код приложения
+│   │   ├── components/     # Переиспользуемые компоненты
+│   │   ├── pages/          # Страницы приложения
+│   │   ├── services/       # Сервисы для работы с API
+│   │   └── ...
+│   └── ...
+├── requirements.txt        # Python зависимости
+├── .gitignore              # Файлы, исключенные из Git
+└── README.md               # Этот файл
 ```
 
 ## Требования
 
 ### Для бэкенда (Django)
 - Python 3.8+
-- Django 3.2+
-- Django REST Framework
-- JWT аутентификация
+- Django 4.2+
+- Django REST Framework 3.14+
+- JWT аутентификация (djangorestframework-simplejwt 5.2+)
+- PostgreSQL 12+
 
 ### Для мобильного приложения (React Native)
 - Node.js 14+
 - React Native 0.70+
 - TypeScript
 - Yarn или npm
+
+### Для веб-приложения отчетов
+- Node.js 16+
+- React 18+
+- TypeScript
+- Vite или Create React App
 
 ## Установка и запуск
 
@@ -57,13 +73,15 @@ aerodyne/
    pip install -r requirements.txt
    ```
 
-3. Примените миграции:
+3. Создайте файл .env в корне проекта на основе .env.example
+
+4. Примените миграции:
    ```bash
    cd delivery_app
    python manage.py migrate
    ```
 
-4. Запустите сервер разработки:
+5. Запустите сервер разработки:
    ```bash
    python manage.py runserver
    ```
@@ -98,6 +116,23 @@ aerodyne/
    yarn ios
    ```
 
+### Web-приложение для отчетов
+
+1. Установите зависимости:
+   ```bash
+   cd delivery-report-web
+   npm install
+   # или
+   yarn install
+   ```
+
+2. Запустите приложение:
+   ```bash
+   npm run dev
+   # или
+   yarn dev
+   ```
+
 ## Функциональность
 
 ### Реализовано
@@ -108,11 +143,13 @@ aerodyne/
 - Поддержка офлайн режима с помощью NetInfo
 - Кэширование данных для работы без интернета
 - Обработка ошибок и уведомления пользователя
+- Формирование отчетов и аналитика (web-приложение)
 
 ### В разработке
 - Отображение доставок на карте
 - Подробная статистика по доставкам
 - Чат между курьером и получателем
+- Интеграция с платежными системами
 
 ## API Endpoints
 
@@ -122,8 +159,7 @@ aerodyne/
 
 ### Пользователи
 - `/api/users/me/` - Информация о текущем пользователе
-- `/api/profile/` - Получение профиля пользователя
-- `/api/profile/` - Обновление профиля пользователя (PUT)
+- `/api/profile/` - Получение/обновление профиля пользователя (GET/PUT)
 
 ### Справочники
 - `/api/transport-models/` - Получение списка моделей транспорта
@@ -146,4 +182,3 @@ aerodyne/
 - `/api/deliveries/{id}/update-all/` - Полное обновление всех полей доставки (PATCH)
 - `/api/deliveries/sync/` - Синхронизация данных о доставках
 - `/api/deliveries/coordinates/` - Получение координат всех доставок
-

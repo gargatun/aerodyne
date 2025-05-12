@@ -726,10 +726,19 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
-        data['user'] = {
+        
+        # Добавляем информацию о пользователе
+        user_data = {
             'id': self.user.id,
             'username': self.user.username,
+            'first_name': self.user.first_name or '',
+            'last_name': self.user.last_name or '',
+            'email': self.user.email or '',
         }
+        
+        # Формируем итоговый ответ в формате, ожидаемом клиентом
+        data['user'] = user_data
+        
         return data
 
 class CustomTokenObtainPairView(TokenObtainPairView):
