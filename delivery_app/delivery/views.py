@@ -662,17 +662,18 @@ class ProfileView(views.APIView):
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
         serializer = UserProfileSerializer(profile)
 
-        # Статистика
+        # Статистика всех доставок (из вкладки "Мои доставки")
         total_deliveries = Delivery.objects.filter(
             courier=request.user
         ).count()
 
+        # Успешные доставки (только из раздела "История")
         successful_deliveries = Delivery.objects.filter(
             courier=request.user,
             status__name="Доставлено"
         ).count()
 
-        # Вычисляем общее время доставки в секундах
+        # Вычисляем общее время доставки в секундах только для завершенных доставок
         completed_deliveries = Delivery.objects.filter(
             courier=request.user,
             status__name="Доставлено"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Button, Avatar, Card, ActivityIndicator, TextInput, Divider, Snackbar } from 'react-native-paper';
 import { authService } from '../services/authService';
@@ -6,6 +6,7 @@ import { User } from '../types';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { apiService } from '../services/api';
 import { API_CONFIG } from '../config';
+import { useUser } from '../context/UserContext';
 
 interface UserProfile {
   user: User;
@@ -25,9 +26,9 @@ interface ProfileScreenProps {
 }
 
 const ProfileScreen = ({ setIsAuthenticated }: ProfileScreenProps) => {
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Получаем данные из контекста пользователя
+  const { userProfile, userStats, loading, refreshing, refreshUserData } = useUser();
+  
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [phone, setPhone] = useState('');
@@ -36,38 +37,13 @@ const ProfileScreen = ({ setIsAuthenticated }: ProfileScreenProps) => {
   const [successMessage, setSuccessMessage] = useState('');
   const { isOffline } = useNetworkStatus();
 
-  useEffect(() => {
-    loadUserData();
-  }, []);
-
-  const loadUserData = async () => {
-    try {
-      console.log('Загрузка данных пользователя...');
-      setLoading(true);
-      
-      const response = await apiService.get<UserProfile & UserStats>(API_CONFIG.endpoints.profile.get);
-      
-      if (response.error) {
-        setError(response.error);
-        return;
-      }
-      
-      if (response.data) {
-        const { user, phone, email, ...stats } = response.data;
-        setUserProfile({ user, phone, email });
-        setUserStats(stats as unknown as UserStats);
-        
-        // Инициализируем поля формы текущими значениями
-        setPhone(phone || '');
-        setEmail(email || '');
-      }
-    } catch (error) {
-      console.error('Error loading user data:', error);
-      setError('Ошибка загрузки данных пользователя');
-    } finally {
-      setLoading(false);
+  // Инициализируем поля формы при получении данных профиля
+  React.useEffect(() => {
+    if (userProfile) {
+      setPhone(userProfile.phone || '');
+      setEmail(userProfile.email || '');
     }
-  };
+  }, [userProfile]);
 
   const handleLogout = async () => {
     try {
@@ -99,8 +75,9 @@ const ProfileScreen = ({ setIsAuthenticated }: ProfileScreenProps) => {
         return;
       }
       
+      // Если обновление прошло успешно, обновляем данные в контексте
       if (response.data) {
-        setUserProfile(response.data);
+        refreshUserData();
         setSuccessMessage('Профиль успешно обновлен');
       }
       
@@ -141,11 +118,7 @@ const ProfileScreen = ({ setIsAuthenticated }: ProfileScreenProps) => {
   const getUserName = (): string => {
     if (!userProfile || !userProfile.user) return 'Пользователь';
     
-    const firstName = userProfile.user.firstName || '';
-    const lastName = userProfile.user.lastName || '';
-    
-    if (!firstName && !lastName) return 'Пользователь';
-    return `${firstName} ${lastName}`.trim();
+    return userProfile.user.username || 'Пользователь';
   };
 
   if (loading) {
@@ -174,7 +147,6 @@ const ProfileScreen = ({ setIsAuthenticated }: ProfileScreenProps) => {
             <View style={styles.infoContainer}>
               {userProfile && (
                 <>
-                  <Text style={styles.infoText}>Логин: {userProfile.user.username}</Text>
                   {userProfile.email && (
                     <Text style={styles.infoText}>Email: {userProfile.email}</Text>
                   )}
@@ -237,38 +209,47 @@ const ProfileScreen = ({ setIsAuthenticated }: ProfileScreenProps) => {
       
       {userStats && (
         <Card style={styles.card}>
-          <Card.Title title="Статистика" />
+          <Card.Title 
+            title="Статистика" 
+            titleStyle={styles.cardTitle}
+          />
           <Card.Content>
-            <View style={styles.statsItem}>
-              <Text style={styles.statsLabel}>Всего доставок:</Text>
-              <Text style={styles.statsValue}>{userStats.total_deliveries}</Text>
-            </View>
-            
-            <Divider style={styles.divider} />
-            
-            <View style={styles.statsItem}>
-              <Text style={styles.statsLabel}>Успешных доставок:</Text>
-              <Text style={styles.statsValue}>{userStats.successful_deliveries}</Text>
-            </View>
-            
-            <Divider style={styles.divider} />
-            
-            <View style={styles.statsItem}>
-              <Text style={styles.statsLabel}>Общее время доставок:</Text>
-              <Text style={styles.statsValue}>{userStats.total_delivery_time_hours.toFixed(1)} ч</Text>
-            </View>
-            
-            {userStats.total_deliveries > 0 && (
-              <>
+            {refreshing ? (
+              <View style={styles.refreshLoading}>
+                <ActivityIndicator size="small" />
+              </View>
+            ) : (
+              <View style={styles.statsContainer}>
+                <View style={styles.statsRow}>
+                  <View style={styles.statsBox}>
+                    <Text style={styles.statsValue}>{userStats.total_deliveries}</Text>
+                    <Text style={styles.statsLabel}>Мои доставки</Text>
+                  </View>
+                  
+                  <View style={styles.statsBox}>
+                    <Text style={styles.statsValue}>{userStats.successful_deliveries}</Text>
+                    <Text style={styles.statsLabel}>Завершённые</Text>
+                  </View>
+                </View>
+                
                 <Divider style={styles.divider} />
                 
-                <View style={styles.statsItem}>
-                  <Text style={styles.statsLabel}>Успешность:</Text>
-                  <Text style={styles.statsValue}>
-                    {(userStats.successful_deliveries / userStats.total_deliveries * 100).toFixed(0)}%
-                  </Text>
+                <View style={styles.statsRow}>
+                  <View style={styles.statsBox}>
+                    <Text style={styles.statsValue}>{userStats.total_delivery_time_hours.toFixed(1)} ч</Text>
+                    <Text style={styles.statsLabel}>Время доставок</Text>
+                  </View>
+                  
+                  {userStats.total_deliveries > 0 && (
+                    <View style={styles.statsBox}>
+                      <Text style={styles.statsValue}>
+                        {(userStats.successful_deliveries / userStats.total_deliveries * 100).toFixed(0)}%
+                      </Text>
+                      <Text style={styles.statsLabel}>Выполнено</Text>
+                    </View>
+                  )}
                 </View>
-              </>
+              </View>
             )}
           </Card.Content>
         </Card>
@@ -326,6 +307,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
   },
+  cardTitle: {
+    textAlign: 'center',
+    fontSize: 18,
+  },
   avatar: {
     marginBottom: 16,
     backgroundColor: '#2196F3',
@@ -373,19 +358,34 @@ const styles = StyleSheet.create({
   divider: {
     marginVertical: 12,
   },
-  statsItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  refreshLoading: {
+    paddingVertical: 20,
     alignItems: 'center',
-    paddingVertical: 4,
   },
-  statsLabel: {
-    fontSize: 16,
-    color: '#616161',
+  statsContainer: {
+    alignSelf: 'stretch',
+    paddingHorizontal: 8,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statsBox: {
+    alignItems: 'center',
+    flex: 1,
   },
   statsValue: {
     fontSize: 18,
     fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  statsLabel: {
+    fontSize: 14,
+    color: '#616161',
+    textAlign: 'center',
   },
 });
 

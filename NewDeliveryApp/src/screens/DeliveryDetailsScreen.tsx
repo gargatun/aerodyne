@@ -11,6 +11,7 @@ import { apiService } from '../services/api';
 import { API_CONFIG } from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../constants';
+import Icon, { IconSet } from '../components/Icon';
 
 type DeliveryDetailsParams = {
   deliveryId: number;
@@ -850,10 +851,12 @@ const DeliveryDetailsScreen = () => {
           
           <Button 
             mode="outlined" 
-            icon="upload" 
             onPress={handleUploadMedia}
             style={styles.uploadButton}
             disabled={isOffline}
+            icon={({size, color}) => (
+              <Icon name="upload" size={size} color={color} />
+            )}
           >
             Загрузить медиафайл
           </Button>

@@ -1,28 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, FlatList, Animated, TouchableOpacity } from 'react-native';
-import { Card, Title, Paragraph, Chip, Text, Snackbar, Badge, ProgressBar, useTheme } from 'react-native-paper';
-import { useNavigation } from '@react-navigation/native';
+import { Title, Paragraph, Chip, Text, Snackbar, Badge, ProgressBar, useTheme, Divider, IconButton, Surface, MD3Theme } from 'react-native-paper';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Delivery, DeliveryStatus } from '../types';
 import { ERROR_MESSAGES } from '../constants';
 import { apiService } from '../services/api';
 import { API_CONFIG } from '../config';
+import { MaterialCard, Icon } from '../components';
+import { useUser } from '../context/UserContext';
 
-const Tab = React.forwardRef(({ children, active, onPress }: { children: React.ReactNode, active: boolean, onPress: () => void }, ref) => {
+const Tab = ({ children, active, onPress }: { children: React.ReactNode, active: boolean, onPress: () => void }) => {
   const theme = useTheme();
   return (
     <TouchableOpacity 
-      style={[styles.tab, active && { borderBottomColor: theme.colors.primary, borderBottomWidth: 2 }]}
+      style={[
+        styles.tab, 
+        { 
+          backgroundColor: active ? theme.colors.primaryContainer : 'transparent'
+        }
+      ]}
       onPress={onPress}
-      ref={ref as any}
     >
-      <Text style={[styles.tabText, active && { color: theme.colors.primary }]}>{children}</Text>
+      {children}
+      {active && (
+        <View 
+          style={[
+            styles.activeIndicator,
+            { backgroundColor: theme.colors.primary }
+          ]} 
+        />
+      )}
     </TouchableOpacity>
   );
-});
+};
 
 const MyDeliveriesScreen = () => {
-  const navigation = useNavigation<any>();
   const [activeTab, setActiveTab] = useState(0);
   const [activeDeliveries, setActiveDeliveries] = useState<Delivery[]>([]);
   const [historyDeliveries, setHistoryDeliveries] = useState<Delivery[]>([]);
@@ -30,11 +43,12 @@ const MyDeliveriesScreen = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const translateX = React.useRef(new Animated.Value(0)).current;
+  const navigation = useNavigation<any>();
   const { isOffline } = useNetworkStatus();
+  const theme = useTheme();
+  const { refreshUserData } = useUser();
   
-  // Для анимации вкладок
-  const [translateX] = useState(new Animated.Value(0));
-
   useEffect(() => {
     fetchActiveDeliveries();
     fetchHistoryDeliveries();
@@ -47,6 +61,13 @@ const MyDeliveriesScreen = () => {
       useNativeDriver: true,
     }).start();
   }, [activeTab]);
+
+  // Обновляем данные профиля при каждом переходе на этот экран
+  useFocusEffect(
+    useCallback(() => {
+      refreshUserData();
+    }, [refreshUserData])
+  );
 
   const fetchActiveDeliveries = async () => {
     setLoadingActive(true);
@@ -158,11 +179,7 @@ const MyDeliveriesScreen = () => {
   const navigateToDeliveryDetails = (deliveryId: number) => {
     navigation.navigate('DeliveryDetails', { 
       deliveryId,
-      onStatusChange: () => {
-        // Обновляем оба списка при изменении статуса
-        fetchActiveDeliveries();
-        fetchHistoryDeliveries();
-      }
+      onStatusChange: fetchActiveDeliveries
     });
   };
 
@@ -177,76 +194,151 @@ const MyDeliveriesScreen = () => {
     }
   };
 
-  const getStatusColor = (status: DeliveryStatus): string => {
+  const getStatusColor = (status: DeliveryStatus, theme: MD3Theme): { bg: string, text: string } => {
     switch (status) {
       case DeliveryStatus.PENDING:
-        return '#FFA000';
+        return { 
+          bg: theme.colors.tertiaryContainer, 
+          text: theme.colors.onTertiaryContainer 
+        };
       case DeliveryStatus.DELIVERED:
-        return '#388E3C';
+        return { 
+          bg: theme.colors.primaryContainer, 
+          text: theme.colors.onPrimaryContainer 
+        };
       default:
-        return '#FFA000';
+        return { 
+          bg: theme.colors.secondaryContainer, 
+          text: theme.colors.onSecondaryContainer 
+        };
     }
   };
 
-  const renderDeliveryItem = ({ item }: { item: Delivery }) => (
-    <Card 
-      style={styles.card} 
-      onPress={() => navigateToDeliveryDetails(item.id)}
-    >
-      <Card.Content>
-        <Title>{item.title}</Title>
-        <Paragraph>{item.description}</Paragraph>
-        <Paragraph>От: {item.fromAddress}</Paragraph>
-        <Paragraph>До: {item.toAddress}</Paragraph>
+  const renderDeliveryItem = ({ item }: { item: Delivery }) => {
+    const statusColors = getStatusColor(item.status, theme);
+    
+    return (
+      <MaterialCard
+        title={item.title}
+        onPress={() => navigateToDeliveryDetails(item.id)}
+        style={styles.card}
+        icon="package-variant"
+      >
         <Chip 
-          style={{ backgroundColor: getStatusColor(item.status), alignSelf: 'flex-start', marginVertical: 8 }}
-          textStyle={{ color: 'white' }}
+          style={{ 
+            backgroundColor: statusColors.bg, 
+            alignSelf: 'flex-start', 
+            marginBottom: 12,
+            borderRadius: 8
+          }}
+          textStyle={{ color: statusColors.text }}
         >
           {getStatusName(item.status)}
         </Chip>
-        <Paragraph>Расстояние: {item.price / 100} км</Paragraph>
+        
+        <View style={styles.cardRow}>
+          <Icon name="map-marker-outline" size={20} color={theme.colors.onSurfaceVariant} />
+          <Paragraph style={styles.cardText}>От: {item.fromAddress}</Paragraph>
+        </View>
+        
+        <View style={styles.cardRow}>
+          <Icon name="map-marker" size={20} color={theme.colors.onSurfaceVariant} />
+          <Paragraph style={styles.cardText}>До: {item.toAddress}</Paragraph>
+        </View>
+        
+        <View style={styles.cardRow}>
+          <Icon name="map-marker-distance" size={20} color={theme.colors.onSurfaceVariant} />
+          <Paragraph style={styles.cardText}>Расстояние: {item.price / 100} км</Paragraph>
+        </View>
+        
+        <Paragraph style={[styles.description, { color: theme.colors.onSurfaceVariant }]}>
+          {item.description}
+        </Paragraph>
         
         {activeTab === 0 && item.status !== DeliveryStatus.DELIVERED && (
           <TouchableOpacity 
-            style={styles.unassignButton} 
+            style={[
+              styles.unassignButton, 
+              { 
+                backgroundColor: theme.colors.errorContainer,
+                borderColor: theme.colors.error,
+              }
+            ]} 
             onPress={() => handleUnassignDelivery(item.id)}
             disabled={isOffline}
           >
-            <Text style={[styles.unassignText, isOffline && styles.disabledText]}>
+            <Text style={[
+              styles.unassignText, 
+              { color: theme.colors.onErrorContainer },
+              isOffline && { color: theme.colors.surfaceDisabled }
+            ]}>
               Отказаться от доставки
             </Text>
           </TouchableOpacity>
         )}
-      </Card.Content>
-    </Card>
-  );
+      </MaterialCard>
+    );
+  };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.tabContainer}>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <Surface style={styles.tabContainer} elevation={1}>
         <Tab active={activeTab === 0} onPress={() => setActiveTab(0)}>
-          Активные
-          {activeDeliveries.length > 0 && <Badge style={styles.badge}>{activeDeliveries.length}</Badge>}
+          <View style={styles.tabContent}>
+            <Text 
+              style={[
+                styles.tabText, 
+                { 
+                  color: activeTab === 0 ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                  fontWeight: activeTab === 0 ? '600' : '400'
+                }
+              ]}
+            >
+              Активные
+            </Text>
+            {activeDeliveries.length > 0 && (
+              <Badge 
+                style={[styles.badge, { backgroundColor: theme.colors.error }]}
+                size={18}
+              >
+                {activeDeliveries.length}
+              </Badge>
+            )}
+          </View>
         </Tab>
         <Tab active={activeTab === 1} onPress={() => setActiveTab(1)}>
-          История
-          {historyDeliveries.length > 0 && <Badge style={styles.badge}>{historyDeliveries.length}</Badge>}
+          <View style={styles.tabContent}>
+            <Text 
+              style={[
+                styles.tabText, 
+                { 
+                  color: activeTab === 1 ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                  fontWeight: activeTab === 1 ? '600' : '400'
+                }
+              ]}
+            >
+              История
+            </Text>
+            {historyDeliveries.length > 0 && (
+              <Badge 
+                style={[styles.badge, { backgroundColor: theme.colors.primary }]}
+                size={18}
+              >
+                {historyDeliveries.length}
+              </Badge>
+            )}
+          </View>
         </Tab>
-        <Animated.View 
-          style={[
-            styles.indicator, 
-            { 
-              transform: [{ translateX }],
-              width: `${100 / 2}%` 
-            }
-          ]} 
-        />
-      </View>
+      </Surface>
       
       {(activeTab === 0 && loadingActive) || (activeTab === 1 && loadingHistory) ? (
         <View style={styles.loadingContainer}>
-          <ProgressBar indeterminate style={styles.progressBar} />
-          <Text>Загрузка данных...</Text>
+          <ProgressBar 
+            indeterminate 
+            style={styles.progressBar} 
+            color={theme.colors.primary}
+          />
+          <Text style={{ color: theme.colors.onSurface }}>Загрузка данных...</Text>
         </View>
       ) : (
         <FlatList
@@ -257,19 +349,20 @@ const MyDeliveriesScreen = () => {
           refreshing={(activeTab === 0 && loadingActive) || (activeTab === 1 && loadingHistory)}
           onRefresh={() => activeTab === 0 ? fetchActiveDeliveries() : fetchHistoryDeliveries()}
           ListEmptyComponent={
-            <Card style={styles.emptyCard}>
-              <Card.Content>
-                <Title style={styles.emptyTitle}>
-                  {activeTab === 0 ? 'Нет активных доставок' : 'История доставок пуста'}
-                </Title>
-                <Paragraph>
-                  {activeTab === 0 
-                    ? 'Посетите экран "Доставки", чтобы найти доступные заказы' 
-                    : 'Завершите хотя бы одну доставку, чтобы увидеть её в истории'
-                  }
-                </Paragraph>
-              </Card.Content>
-            </Card>
+            <MaterialCard 
+              title={activeTab === 0 ? 'Нет активных доставок' : 'История доставок пуста'}
+              style={styles.emptyCard}
+              mode="elevated"
+              elevation={2}
+              icon={activeTab === 0 ? "package-variant-closed-remove" : "history"}
+            >
+              <Paragraph style={{ textAlign: 'center', color: theme.colors.onSurfaceVariant }}>
+                {activeTab === 0 
+                  ? 'Посетите экран "Доставки", чтобы найти доступные заказы' 
+                  : 'Завершите хотя бы одну доставку, чтобы увидеть её в истории'
+                }
+              </Paragraph>
+            </MaterialCard>
           }
         />
       )}
@@ -281,6 +374,8 @@ const MyDeliveriesScreen = () => {
           label: 'ОК',
           onPress: () => setError(''),
         }}
+        style={{ backgroundColor: theme.colors.errorContainer }}
+        theme={{ colors: { surface: theme.colors.errorContainer, onSurface: theme.colors.onErrorContainer } }}
       >
         {error}
       </Snackbar>
@@ -292,6 +387,8 @@ const MyDeliveriesScreen = () => {
           label: 'ОК',
           onPress: () => setSuccessMessage(''),
         }}
+        style={{ backgroundColor: theme.colors.primaryContainer }}
+        theme={{ colors: { surface: theme.colors.primaryContainer, onSurface: theme.colors.onPrimaryContainer } }}
       >
         {successMessage}
       </Snackbar>
@@ -302,52 +399,76 @@ const MyDeliveriesScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    elevation: 4,
     position: 'relative',
+    zIndex: 1,
   },
   tab: {
     flex: 1,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+    overflow: 'hidden',
   },
   tabText: {
     fontSize: 16,
-    fontWeight: '500',
+    marginRight: 4,
+    textAlign: 'center',
   },
-  indicator: {
+  tabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    paddingHorizontal: 8,
+  },
+  activeIndicator: {
     position: 'absolute',
-    height: 2,
+    height: 3,
     bottom: 0,
-    backgroundColor: '#2196F3',
+    left: 0,
+    right: 0,
   },
   listContainer: {
     padding: 8,
   },
   card: {
     margin: 8,
-    elevation: 2,
+    borderRadius: 16,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardText: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  description: {
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  badgeContainer: {
+    marginLeft: 4,
+    zIndex: 2,
+    alignSelf: 'flex-start',
   },
   badge: {
-    position: 'absolute',
-    top: 4,
-    right: -20,
+    marginLeft: 4,
   },
   unassignButton: {
-    marginTop: 8,
-    padding: 8,
+    marginTop: 12,
+    padding: 12,
     alignItems: 'center',
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#f44336',
+    borderRadius: 8,
+    borderWidth: 0,
   },
   unassignText: {
-    color: '#f44336',
+    fontWeight: '500',
   },
   disabledText: {
     color: '#9e9e9e',
@@ -366,6 +487,7 @@ const styles = StyleSheet.create({
     margin: 16,
     padding: 16,
     alignItems: 'center',
+    borderRadius: 16,
   },
   emptyTitle: {
     textAlign: 'center',

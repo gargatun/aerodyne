@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, FlatList, StyleSheet } from 'react-native';
-import { Card, Title, Paragraph, Button, Snackbar, Chip, FAB, TextInput, Menu, Divider, List } from 'react-native-paper';
-import { useNavigation } from '@react-navigation/native';
+import { Title, Paragraph, Button, Snackbar, Chip, FAB, TextInput, Menu, Divider, List, useTheme, Card } from 'react-native-paper';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { deliveryService } from '../services/deliveryService';
 import { Delivery, DeliveryStatus } from '../types';
 import { ERROR_MESSAGES } from '../constants';
 import { apiService } from '../services/api';
+import Icon from '../components/Icon';
+import { MaterialCard } from '../components';
+import { useUser } from '../context/UserContext';
 
 // Добавляем интерфейс для фильтров
 interface DeliveryFilters {
@@ -21,6 +24,8 @@ const DeliveriesScreen = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const { isOffline } = useNetworkStatus();
+  const theme = useTheme();
+  const { refreshUserData } = useUser();
   
   // Состояния для фильтрации
   const [maxDistance, setMaxDistance] = useState('');
@@ -108,6 +113,13 @@ const DeliveriesScreen = () => {
     fetchDeliveries();
   }, []);
 
+  // Обновляем данные профиля при каждом переходе на этот экран
+  useFocusEffect(
+    useCallback(() => {
+      refreshUserData();
+    }, [refreshUserData])
+  );
+
   const handleAssignDelivery = async (id: number) => {
     try {
       const response = await apiService.patch(`/deliveries/${id}/assign/`, {});
@@ -176,40 +188,72 @@ const DeliveriesScreen = () => {
   const getStatusColor = (status: DeliveryStatus): string => {
     switch (status) {
       case DeliveryStatus.PENDING:
-        return '#FFA000';
+        return theme.colors.tertiaryContainer;
       case DeliveryStatus.DELIVERED:
-        return '#388E3C';
+        return theme.colors.primaryContainer;
       default:
-        return '#FFA000';
+        return theme.colors.secondaryContainer;
     }
   };
 
-  const renderDelivery = ({ item }: { item: Delivery }) => (
-    <Card style={styles.card} onPress={() => navigateToDeliveryDetails(item.id)}>
-      <Card.Content>
-        <Title>{item.title}</Title>
-        <Paragraph>{item.description}</Paragraph>
-        <Paragraph>От: {item.fromAddress}</Paragraph>
-        <Paragraph>До: {item.toAddress}</Paragraph>
+  const renderDelivery = ({ item }: { item: Delivery }) => {
+    const statusColor = getStatusColor(item.status);
+    const textColor = statusColor === theme.colors.primaryContainer ? 
+      theme.colors.onPrimaryContainer : 
+      (statusColor === theme.colors.tertiaryContainer ? 
+        theme.colors.onTertiaryContainer : 
+        theme.colors.onSecondaryContainer);
+        
+    return (
+      <MaterialCard 
+        title={item.title}
+        icon="package-variant"
+        onPress={() => navigateToDeliveryDetails(item.id)}
+        style={styles.card}
+        footer={
+          <Button 
+            mode="contained" 
+            onPress={() => handleAssignDelivery(item.id)} 
+            disabled={loading || isOffline}
+            icon={({size, color}) => (
+              <Icon name="check" size={size} color={color} />
+            )}
+          >
+            Принять
+          </Button>
+        }
+      >
+        <Paragraph style={styles.description}>{item.description}</Paragraph>
+        
+        <View style={styles.cardRow}>
+          <Icon name="map-marker-outline" size={20} color={theme.colors.onSurfaceVariant} />
+          <Paragraph style={styles.cardText}>От: {item.fromAddress}</Paragraph>
+        </View>
+        
+        <View style={styles.cardRow}>
+          <Icon name="map-marker" size={20} color={theme.colors.onSurfaceVariant} />
+          <Paragraph style={styles.cardText}>До: {item.toAddress}</Paragraph>
+        </View>
+        
+        <View style={styles.cardRow}>
+          <Icon name="map-marker-distance" size={20} color={theme.colors.onSurfaceVariant} />
+          <Paragraph style={styles.cardText}>Расстояние: {item.price / 100} км</Paragraph>
+        </View>
+        
         <Chip 
-          style={{ backgroundColor: getStatusColor(item.status), alignSelf: 'flex-start', marginVertical: 8 }}
-          textStyle={{ color: 'white' }}
+          style={{ 
+            backgroundColor: statusColor, 
+            alignSelf: 'flex-start', 
+            marginTop: 12,
+            borderRadius: 8 
+          }}
+          textStyle={{ color: textColor }}
         >
           {getStatusName(item.status)}
         </Chip>
-        <Paragraph>Расстояние: {item.price / 100} км</Paragraph>
-      </Card.Content>
-      <Card.Actions>
-        <Button 
-          mode="contained" 
-          onPress={() => handleAssignDelivery(item.id)} 
-          disabled={loading || isOffline}
-        >
-          Принять
-        </Button>
-      </Card.Actions>
-    </Card>
-  );
+      </MaterialCard>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -217,7 +261,9 @@ const DeliveriesScreen = () => {
       <View style={styles.filterContainer}>
         <Button 
           mode={filtersApplied ? "contained" : "outlined"}
-          icon="filter" 
+          icon={({size, color}) => (
+            <Icon name="filter" size={size} color={color} />
+          )}
           onPress={() => setFilterMenuVisible(true)}
           style={styles.filterButton}
         >
@@ -252,7 +298,9 @@ const DeliveriesScreen = () => {
               onPress={() => setSortBy(option.value)}
               right={props => 
                 sortBy === option.value ? (
-                  <List.Icon {...props} icon="check" />
+                  <List.Icon {...props} icon={({size, color}) => (
+                    <Icon name="check" size={size} color={color} />
+                  )} />
                 ) : null
               }
             />
@@ -290,12 +338,17 @@ const DeliveriesScreen = () => {
         })}
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={
-          <Card style={styles.emptyCard}>
-            <Card.Content>
-              <Title style={styles.emptyTitle}>Нет доступных доставок</Title>
-              <Paragraph>Попробуйте изменить параметры фильтра или обновить список</Paragraph>
-            </Card.Content>
-          </Card>
+          <MaterialCard 
+            title="Нет доступных доставок"
+            style={styles.emptyCard}
+            icon="package-variant-closed-remove"
+            mode="elevated"
+            elevation={2}
+          >
+            <Paragraph style={{ textAlign: 'center', color: theme.colors.onSurfaceVariant }}>
+              Попробуйте изменить параметры фильтра или обновить список
+            </Paragraph>
+          </MaterialCard>
         }
       />
       
@@ -323,7 +376,9 @@ const DeliveriesScreen = () => {
       
       <FAB
         style={styles.fab}
-        icon="plus"
+        icon={({size, color}) => (
+          <Icon name="plus" size={size} color={color} />
+        )}
         onPress={handleCreateDelivery}
         disabled={isOffline}
       />
@@ -343,6 +398,19 @@ const styles = StyleSheet.create({
   card: {
     margin: 8,
     elevation: 2,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardText: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  description: {
+    marginBottom: 12,
+    fontStyle: 'italic',
   },
   fab: {
     position: 'absolute',

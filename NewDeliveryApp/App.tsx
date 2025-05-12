@@ -1,6 +1,6 @@
 /**
- * Sample React Native App
- * https://github.com/facebook/react-native
+ * Delivery App
+ * Material Design 3 Implementation
  *
  * @format
  */
@@ -11,9 +11,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, StyleSheet, LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 
 import AppNavigator from './src/navigation/AppNavigator';
 import OfflineNotice from './src/components/OfflineNotice';
+import { UserProvider } from './src/context/UserContext';
 import theme from './src/theme';
 
 // Импортируем i18n
@@ -25,6 +27,20 @@ LogBox.ignoreLogs([
   'EventEmitter.removeListener',
   'DatePickerIOS has been merged',
 ]);
+
+// Настройка темы навигации для отключения эффекта нажатия
+const navigationTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: theme.colors.background,
+    primary: theme.colors.primary,
+    // Добавляем прозрачные цвета для кнопок навигации
+    notification: 'transparent', // Используется для индикатора уведомлений
+    card: theme.colors.background, // Фон карточек навигации
+    border: 'transparent', // Граница элементов навигации
+  },
+};
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -40,14 +56,25 @@ const App = () => {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <PaperProvider theme={theme}>
-          <View style={styles.container}>
-            <OfflineNotice />
-            <AppNavigator 
-              isAuthenticated={isAuthenticated} 
-              setIsAuthenticated={setIsAuthenticated} 
-            />
-          </View>
+        <PaperProvider 
+          theme={theme}
+          settings={{
+            rippleEffectEnabled: false, // Отключаем эффект волны в Paper
+          }}
+        >
+          <NavigationContainer 
+            theme={navigationTheme}
+          >
+            <UserProvider>
+              <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+                <OfflineNotice />
+                <AppNavigator 
+                  isAuthenticated={isAuthenticated} 
+                  setIsAuthenticated={setIsAuthenticated} 
+                />
+              </View>
+            </UserProvider>
+          </NavigationContainer>
         </PaperProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
